@@ -19,22 +19,34 @@ driver, hardware or numerical-library failures.
 
 ## Installation
 
-Install a locally built or downloaded **0.2.0** wheel:
+With Python 3.10 or newer, install directly from the current GitHub `main`
+branch (no Git installation or manual download required):
 
 ```shell
-python -m pip install path/to/natus_erd_reader-0.2.0-py3-none-any.whl
+python -m pip install --upgrade "https://github.com/ms903/natus-erd-reader/archive/refs/heads/main.zip"
 ```
 
-From a source checkout containing these changes:
+Run this command in the Python environment where you want to use the reader.
+The current `main` branch contains **0.2.0**, including the resource-limit
+fixes and Python-only API. This installs development source, not a tagged
+GitHub Release. NumPy is installed automatically if needed.
+
+Check the installed version without loading NumPy or opening a recording:
+
+```shell
+python -c "from importlib.metadata import version; print(version('natus-erd-reader'))"
+```
+
+Alternatively, from a local source checkout:
 
 ```shell
 python -m pip install .
 ```
 
-Available published versions are listed in
+Tagged releases, when available, are listed in
 [GitHub Releases](https://github.com/ms903/natus-erd-reader/releases).
-This README does not imply that 0.2.0 has already been published. The project
-is not currently published on PyPI. The distribution name is
+The project is not currently published on PyPI, so use the GitHub command
+above instead of `pip install natus-erd-reader`. The distribution name is
 `natus-erd-reader`; the import name is `natus_erd`.
 
 ## Read a small window
