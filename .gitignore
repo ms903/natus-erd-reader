@@ -1,0 +1,37 @@
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.natus-erd-test-*/
+
+# Local clinical recordings and derived results must never be published.
+/data/
+/figures/
+/reports/
+*.erd
+*.etc
+*.stc
+*.eeg
+*.ent
+*.ent.old
+*.edf
+*.bdf
+*.npy
+*.npz
+*.avi
+*.mp4
+*.mov
+
+# Local environments and credentials.
+.venv*/
+.package-smoke*/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store
+Thumbs.db

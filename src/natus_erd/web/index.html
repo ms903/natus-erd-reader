@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta
+      name="description"
+      content="本地同步浏览 Natus NeuroWorks ERD 与导出 EDF 波形"
+    />
+    <title>NeuroScope · ERD / EDF 浏览器</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">NS</span>
+        <div>
+          <h1>NeuroScope</h1>
+          <p>ERD / EDF 同步波形浏览器</p>
+        </div>
+      </div>
+      <div class="connection" id="connectionStatus" role="status">
+        <span class="status-dot"></span>
+        <span>正在连接本地记录…</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="control-surface" aria-label="浏览控制">
+        <div class="control-grid">
+          <label class="field">
+            <span>起始时间</span>
+            <span class="input-with-unit">
+              <input id="startInput" type="number" min="0" step="0.25" value="0" />
+              <em>秒</em>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>窗口长度</span>
+            <select id="durationSelect">
+              <option value="0.5">0.5 秒</option>
+              <option value="1">1 秒</option>
+              <option value="2" selected>2 秒</option>
+              <option value="5">5 秒</option>
+              <option value="10">10 秒</option>
+            </select>
+          </label>
+
+          <div class="field channel-field">
+            <span>显示通道</span>
+            <button class="channel-trigger" id="channelButton" type="button">
+              选择通道
+            </button>
+          </div>
+
+          <div class="navigation-actions">
+            <button class="icon-button" id="previousButton" type="button" aria-label="上一个窗口">←</button>
+            <button class="primary-button" id="loadButton" type="button">读取窗口</button>
+            <button class="icon-button" id="nextButton" type="button" aria-label="下一个窗口">→</button>
+          </div>
+        </div>
+
+        <div class="channel-chips" id="channelChips" aria-live="polite"></div>
+
+        <div class="timeline-row">
+          <span id="timelineStart">00:00:00</span>
+          <input id="timeline" type="range" min="0" max="1" step="0.25" value="0" aria-label="记录时间轴" />
+          <span id="timelineEnd">--:--:--</span>
+        </div>
+      </section>
+
+      <section class="summary-grid" aria-label="当前窗口摘要">
+        <article class="summary-card">
+          <span>当前窗口</span>
+          <strong id="windowSummary">等待读取</strong>
+          <small id="sampleSummary">—</small>
+        </article>
+        <article class="summary-card">
+          <span>格式对齐</span>
+          <strong id="alignmentSummary">—</strong>
+          <small id="labelSummary">—</small>
+        </article>
+        <article class="summary-card accent-cyan">
+          <span>最大数字误差</span>
+          <strong id="lsbSummary">—</strong>
+          <small>仅统计 EDF int16 范围内样本</small>
+        </article>
+        <article class="summary-card accent-amber">
+          <span>ERD 保留的越界值</span>
+          <strong id="clippedSummary">—</strong>
+          <small id="uvSummary">物理量误差 —</small>
+        </article>
+      </section>
+
+      <section class="workspace" id="workspace" aria-label="波形工作区">
+        <div class="workspace-heading">
+          <div>
+            <p class="eyebrow">SYNCHRONIZED VIEW</p>
+            <h2>原生 ERD 与导出 EDF</h2>
+          </div>
+          <div class="workspace-tools">
+            <div class="legend" aria-label="波形图例">
+              <span><i class="erd-swatch"></i>ERD 原生</span>
+              <span><i class="edf-swatch"></i>EDF 导出</span>
+              <span><i class="diff-swatch"></i>差值 ERD − EDF</span>
+            </div>
+            <div class="mode-switch" role="group" aria-label="显示模式">
+              <button id="overlayMode" type="button" aria-pressed="true">叠加</button>
+              <button id="splitMode" type="button" aria-pressed="false">分栏</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="plot-loading" id="plotLoading" hidden>
+          <span class="spinner"></span>
+          正在读取当前窗口…
+        </div>
+
+        <div id="overlayPlots" class="plot-container">
+          <canvas id="overlayCanvas" aria-label="ERD 和 EDF 叠加波形图">当前浏览器不支持 Canvas。</canvas>
+        </div>
+        <div id="splitPlots" class="split-plots" hidden>
+          <div class="plot-container source-panel">
+            <h3>ERD 原生</h3>
+            <canvas id="erdCanvas" aria-label="ERD 原生波形图">当前浏览器不支持 Canvas。</canvas>
+          </div>
+          <div class="plot-container source-panel">
+            <h3>EDF 导出</h3>
+            <canvas id="edfCanvas" aria-label="EDF 导出波形图">当前浏览器不支持 Canvas。</canvas>
+          </div>
+        </div>
+
+        <div class="difference-panel">
+          <div class="difference-heading">
+            <div>
+              <p class="eyebrow">RESIDUAL</p>
+              <h3>差值曲线 · ERD − EDF</h3>
+            </div>
+            <span>单位 µV · 各通道独立、以零线为中心</span>
+          </div>
+          <div class="plot-container difference-plot">
+            <canvas id="diffCanvas" aria-label="ERD 减去 EDF 的差值曲线">当前浏览器不支持 Canvas。</canvas>
+          </div>
+        </div>
+      </section>
+
+      <section class="events-panel" aria-labelledby="eventsTitle">
+        <div>
+          <p class="eyebrow">ENT ANNOTATIONS</p>
+          <h2 id="eventsTitle">当前窗口事件</h2>
+        </div>
+        <div class="event-list" id="eventList">
+          <p class="empty-state">当前窗口没有事件</p>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="channelDialog" class="channel-dialog">
+      <form method="dialog">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">CHANNELS</p>
+            <h2>选择显示通道</h2>
+          </div>
+          <button class="close-button" value="cancel" aria-label="关闭">×</button>
+        </div>
+        <label class="search-field">
+          <span class="sr-only">搜索通道</span>
+          <input id="channelSearch" type="search" placeholder="输入名称或编号，例如 E'1 / 24" autocomplete="off" />
+        </label>
+        <p class="selection-hint" id="selectionHint">最多选择 8 个通道</p>
+        <div class="channel-options" id="channelOptions"></div>
+        <div class="dialog-actions">
+          <button class="primary-button" id="applyChannels" value="default">应用并读取</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="alert" hidden></div>
+  </body>
+</html>

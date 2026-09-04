@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "natus-erd-reader"
+version = "0.1.0"
+description = "Lazy, NumPy-only Natus NeuroWorks ERD reader with EDF comparison tools"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT AND BSD-3-Clause"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+authors = [{name = "ms903 and natus-erd-reader contributors"}]
+dependencies = ["numpy>=1.24"]
+keywords = ["eeg", "seeg", "natus", "neuroworks", "erd", "edf"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Medical Science Apps.",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/ms903/natus-erd-reader"
+Repository = "https://github.com/ms903/natus-erd-reader"
+Issues = "https://github.com/ms903/natus-erd-reader/issues"
+Changelog = "https://github.com/ms903/natus-erd-reader/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.7"]
+validation = ["pyEDFlib>=0.1.30"]
+dev = ["build>=1.2", "twine>=5", "mypy>=1.8"]
+
+[project.scripts]
+natus-erd = "natus_erd.cli:main"
+natus-erd-viewer = "natus_erd.viewer:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+natus_erd = ["py.typed", "web/*.html", "web/*.css", "web/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
