@@ -119,7 +119,7 @@ class EntTextSafetyTests(unittest.TestCase):
         self.assertEqual(channel_names_from_notes((note,)), ("A1", "B'12", "左侧"))
         self.assertEqual(_names_from_raw_montage('(.(."Text", "ChanNames"), (."Other", ("not-a-channel")))'), ())
         self.assertEqual(_names_from_raw_montage('(.(."ChanNames", (__import__("os"))))'), ())
-        self.assertEqual(_names_from_raw_montage('(.(."ChanNames", ("A", ("nested"))))'), ())
+        self.assertEqual(_names_from_raw_montage('(.(."ChanNames", ("A", ("nested"))))'), ("A", None))
 
     def test_montage_fallback_and_field_walk_are_bounded(self) -> None:
         limits = replace(DEFAULT_LIMITS, max_parse_depth=4, max_parse_nodes=8)

@@ -46,5 +46,14 @@ web assets, EDF readers, optional plotting dependencies or real data to it.
 5. Push an annotated `vX.Y.Z` tag. The release workflow builds and attaches a
    wheel and source archive to the GitHub release.
 
-The GitHub workflows do not publish to PyPI. PyPI publication is a separate,
-explicitly authorized step; no PyPI credentials are required for this repository.
+6. For an explicitly authorized PyPI publication, configure a PyPI Trusted
+   Publisher for owner `ms903`, repository `natus-erd-reader`, workflow
+   `publish-pypi.yml`, and environment `pypi`. A new PyPI project requires a
+   pending publisher under the account's Publishing settings. See the
+   [official PyPI setup guide](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/).
+7. Manually run `publish-pypi.yml` with the released tag. It audits the existing
+   GitHub Release archives and uploads those same files using short-lived OIDC
+   credentials. It does not rebuild them or require a stored PyPI API token.
+
+PyPI publication is a separate, explicitly authorized step, not triggered by
+ordinary pushes or by the GitHub Release workflow. Never commit credentials.

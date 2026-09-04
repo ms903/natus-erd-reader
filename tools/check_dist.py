@@ -25,6 +25,7 @@ SOURCE_ROOT_FILES = {
 }
 REQUIRED_PACKAGE_FILES = {
     "natus_erd/__init__.py", "natus_erd/py.typed",
+    "natus_erd/_paths.py",
     "natus_erd/reader.py", "natus_erd/decoder.py", "natus_erd/binary.py",
     "natus_erd/ent.py", "natus_erd/errors.py", "natus_erd/limits.py",
     "natus_erd/models.py",

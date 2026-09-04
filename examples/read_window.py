@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from math import ceil
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,7 +19,7 @@ def read_first_second(recording: str | Path) -> np.ndarray:
         recording,
         limits=ReadLimits(max_read_bytes=16 * 1024 * 1024),
     )
-    stop = min(reader.info.n_samples, round(reader.info.sample_rate))
+    stop = min(reader.info.n_samples, ceil(reader.info.sample_rate))
     return reader.read_samples(0, stop, channels=[0, 1])
 
 

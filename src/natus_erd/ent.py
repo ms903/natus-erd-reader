@@ -347,18 +347,21 @@ def _find_named_value(value: Any, key: str, *, limits: ReadLimits = DEFAULT_LIMI
     return None
 
 
-def _names_from_value(value: Any, *, limits: ReadLimits = DEFAULT_LIMITS) -> tuple[str, ...]:
+def _name_slot(value: Any) -> str | None:
+    """Keep valid vendor text verbatim, without shifting empty label slots."""
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _names_from_value(value: Any, *, limits: ReadLimits = DEFAULT_LIMITS) -> tuple[str | None, ...]:
     found = _find_named_value(value, "ChanNames", limits=limits)
     if isinstance(found, Sequence) and not isinstance(found, (str, bytes)):
         if len(found) > limits.max_parse_nodes:
             raise ResourceLimitError("ENT channel names exceed the configured node count")
-        names = tuple(item for item in found if isinstance(item, str))
-        if names:
-            return names
+        return tuple(_name_slot(item) for item in found)
     return ()
 
 
-def _names_from_raw_montage(text: str, *, limits: ReadLimits = DEFAULT_LIMITS) -> tuple[str, ...]:
+def _names_from_raw_montage(text: str, *, limits: ReadLimits = DEFAULT_LIMITS) -> tuple[str | None, ...]:
     """Recover only a quoted ChanNames field from unsupported montage syntax."""
     try:
         _check_text_size(text, limits)
@@ -388,8 +391,8 @@ def _names_from_raw_montage(text: str, *, limits: ReadLimits = DEFAULT_LIMITS) -
                                 require_end=False, start=tail,
                                 initial_nodes=nodes, base_depth=depth,
                             )
-                            if isinstance(names, list) and names and all(isinstance(name, str) for name in names):
-                                return tuple(names)
+                            if isinstance(names, list) and names:
+                                return tuple(_name_slot(name) for name in names)
                             # Do not search repeated or nested candidates after
                             # a malformed channel list; the field is ambiguous.
                             return ()
@@ -407,8 +410,12 @@ def _names_from_raw_montage(text: str, *, limits: ReadLimits = DEFAULT_LIMITS) -
     return ()
 
 
-def channel_names_from_notes(notes: Sequence[EntNote], *, limits: ReadLimits = DEFAULT_LIMITS) -> tuple[str, ...]:
-    """Return names from the last usable montage note."""
+def channel_names_from_notes(notes: Sequence[EntNote], *, limits: ReadLimits = DEFAULT_LIMITS) -> tuple[str | None, ...]:
+    """Return positional names from the last nonempty montage list.
+
+    Even a list consisting entirely of missing labels is usable: falling back
+    to an older montage would silently assign stale labels to these channels.
+    """
     for note in reversed(notes):
         names = _names_from_value(note.value, limits=limits)
         if not names:
@@ -416,6 +423,33 @@ def channel_names_from_notes(notes: Sequence[EntNote], *, limits: ReadLimits = D
         if names:
             return names
     return ()
+
+
+def complete_channel_names(names: Sequence[str | None], n_channels: int) -> tuple[str, ...]:
+    """Fill missing slots with collision-free, zero-based ``chanNNN`` names.
+
+    Reserve all real vendor labels before generating defaults, including labels
+    beyond the recorded channel count. Real duplicate names remain duplicates;
+    the reader can reject ambiguous name selection without rewriting metadata.
+    """
+    if isinstance(n_channels, bool) or not isinstance(n_channels, int):
+        raise TypeError("n_channels must be an integer")
+    if n_channels < 0:
+        raise ValueError("n_channels must be nonnegative")
+    reserved = {name for name in names if _name_slot(name) is not None}
+    result: list[str] = []
+    for index in range(n_channels):
+        name = _name_slot(names[index]) if index < len(names) else None
+        if name is None:
+            base = f"chan{index:03d}"
+            name = base
+            suffix = 0
+            while name in reserved:
+                suffix += 1
+                name = f"{base}_{suffix}"
+            reserved.add(name)
+        result.append(name)
+    return tuple(result)
 
 
 def events_from_notes(notes: Sequence[EntNote], origin_stamp: int) -> tuple[Event, ...]:

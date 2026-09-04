@@ -18,7 +18,10 @@ class SyntheticRecording:
     expected: tuple[tuple[int | None, ...], ...]
 
 
-def build_recording(root: Path) -> SyntheticRecording:
+def build_recording(
+    root: Path, *, sample_rate: float = 2048.0,
+    shorted: set[int] | frozenset[int] = frozenset(SHORTED),
+) -> SyntheticRecording:
     directory = root / "中文记录"
     directory.mkdir()
     stem = "记录"
@@ -29,8 +32,8 @@ def build_recording(root: Path) -> SyntheticRecording:
     packet_stamps = ((1000, 1003), (1006,))
 
     for segment_index, segment_name in enumerate(segment_names):
-        packets = [_encode_packet(samples) for samples in packet_groups[segment_index]]
-        erd = bytearray(_erd_header())
+        packets = [_encode_packet(samples, shorted=shorted) for samples in packet_groups[segment_index]]
+        erd = bytearray(_erd_header(sample_rate=sample_rate, shorted=shorted))
         offsets: list[int] = []
         for packet in packets:
             offsets.append(len(erd))
@@ -50,7 +53,7 @@ def build_recording(root: Path) -> SyntheticRecording:
     stc_data = bytearray(_generic_header(1))
     stc_data.extend(pack("<ii12i", 1, 1, *([0] * 12)))
     stc_data.extend(_stc_entry(segment_names[0], 1000, 1004, 0))
-    stc_data.extend(_stc_entry(segment_names[1], 1005, 1009, 5))
+    stc_data.extend(_stc_entry(segment_names[1], 1005, 1009, 5, stored_samples=4))
     stc.write_bytes(stc_data)
 
     eeg = directory / f"{stem}.eeg"
@@ -82,26 +85,32 @@ def _generic_header(schema: int) -> bytes:
     return bytes(header)
 
 
-def _erd_header() -> bytes:
+def _erd_header(
+    *, sample_rate: float = 2048.0, shorted: set[int] | frozenset[int] = frozenset(SHORTED)
+) -> bytes:
     header = bytearray(HEADER_SIZE)
     header[:352] = _generic_header(9)
-    pack_into("<dii", header, 352, 2048.0, N_CHANNELS, 8)
+    pack_into("<dii", header, 352, sample_rate, N_CHANNELS, 8)
     pack_into(f"<{N_CHANNELS}i", header, 368, *range(N_CHANNELS))
     pack_into("<4i", header, 4464, 20, 0, 0, 0)
     pack_into("<i", header, 4556, 6)
-    for channel in SHORTED:
+    for channel in shorted:
         pack_into("<h", header, 4560 + channel * 2, 1)
     for channel in range(N_CHANNELS):
         pack_into("<h", header, 6608 + channel * 2, 32767)
     return bytes(header)
 
 
-def _stc_entry(name: str, start: int, end: int, sample_number: int) -> bytes:
+def _stc_entry(
+    name: str, start: int, end: int, sample_number: int,
+    *, stored_samples: int | None = None,
+) -> bytes:
     encoded = name.encode("utf-8")
     if len(encoded) >= 256:
         raise AssertionError("synthetic segment name is too long")
     name_field = encoded + bytes(256 - len(encoded))
-    return name_field + pack("<4i", start, end, sample_number, end - start + 1)
+    count = end - start + 1 if stored_samples is None else stored_samples
+    return name_field + pack("<4i", start, end, sample_number, count)
 
 
 def _stored_values() -> list[list[int]]:
@@ -133,8 +142,11 @@ def _stored_values() -> list[list[int]]:
     ]
 
 
-def _encode_packet(samples: tuple[list[int], ...] | list[list[int]]) -> bytes:
-    active = [channel for channel in range(N_CHANNELS) if channel not in SHORTED]
+def _encode_packet(
+    samples: tuple[list[int], ...] | list[list[int]],
+    *, shorted: set[int] | frozenset[int] = frozenset(SHORTED),
+) -> bytes:
+    active = [channel for channel in range(N_CHANNELS) if channel not in shorted]
     mask_size = (N_CHANNELS + 7) // 8
     encoded = bytearray()
     previous: list[int] | None = None

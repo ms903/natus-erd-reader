@@ -46,7 +46,12 @@ class StcEntry:
     start_stamp: int
     end_stamp: int
     sample_number: int
-    sample_span: int
+    stored_samples: int
+
+    @property
+    def logical_span(self) -> int:
+        """Elapsed sample positions, including gaps with no stored packets."""
+        return self.end_stamp - self.start_stamp + 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,15 +224,17 @@ def read_stc(path: Path, *, limits: ReadLimits = DEFAULT_LIMITS) -> StcFile:
         if not _safe_segment_name(stem) or stem.casefold() in names:
             raise DataIntegrityError(f"STC segment {index} has an unsafe or duplicate stem")
         names.add(stem.casefold())
-        start, end, sample_number, span = unpack_from("<4i", data, offset + 256)
-        if end < start or span != end - start + 1:
+        start, end, sample_number, stored_samples = unpack_from("<4i", data, offset + 256)
+        if end < start:
             raise DataIntegrityError(
                 f"STC segment {index} has inconsistent stamp bounds"
             )
+        if not 0 <= stored_samples <= end - start + 1:
+            raise DataIntegrityError(f"STC segment {index} has an invalid stored sample count")
         if entries and start <= entries[-1].end_stamp:
             raise DataIntegrityError(f"STC segments overlap at entry {index}")
         entries.append(
-            StcEntry(index, name, start, end, sample_number, span)
+            StcEntry(index, name, start, end, sample_number, stored_samples)
         )
 
     if not entries:
