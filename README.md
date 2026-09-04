@@ -2,6 +2,10 @@
 
 [![Tests and package build](https://github.com/ms903/natus-erd-reader/actions/workflows/ci.yml/badge.svg)](https://github.com/ms903/natus-erd-reader/actions/workflows/ci.yml)
 
+**Documentation:** [中文文档](https://natus-reader.github.io/) ·
+[English documentation](https://natus-reader.github.io/en/) ·
+[Quick Start](https://natus-reader.github.io/quick-start/)
+
 A small Python library for native Natus NeuroWorks ERD recordings. It reads
 sample windows through the STC/ETC indexes, decodes schema-9 packets and
 extracts ENT annotations. It has **no command-line application, web server,
