@@ -13,18 +13,20 @@ from natus_erd.errors import DataIntegrityError
 
 
 class EntSafetyTests(unittest.TestCase):
-    def test_excel_parser_uses_literal_eval_not_eval(self) -> None:
+    def test_excel_parser_never_executes_python(self) -> None:
         event = '(.(."Stamp", 42), (."Text", "safe"))'
-        with patch("builtins.eval", side_effect=AssertionError("eval was called")):
+        with patch("builtins.eval", side_effect=AssertionError("eval was called")), patch.object(
+            ast, "literal_eval", side_effect=AssertionError("AST evaluation was called")
+        ):
             parsed = _safe_parse_excel(event)
         self.assertEqual(parsed["Stamp"], 42)
         self.assertEqual(parsed["Text"], "safe")
 
     def test_expression_is_not_executed(self) -> None:
         expression = '__import__("os").system("this-must-not-run")'
-        with patch.object(ast, "literal_eval", wraps=ast.literal_eval) as literal:
+        with patch.object(ast, "literal_eval", side_effect=AssertionError("AST evaluation was called")) as literal:
             self.assertIsNone(_safe_parse_excel(expression))
-        literal.assert_called_once()
+        literal.assert_not_called()
 
 
 class DecoderIntegrityTests(unittest.TestCase):

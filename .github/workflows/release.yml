@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# Bound the test runner's numerical backend; the library never sets this.
+env:
+  OPENBLAS_NUM_THREADS: "1"
+  OMP_NUM_THREADS: "1"
+
 jobs:
   release:
     runs-on: ubuntu-latest

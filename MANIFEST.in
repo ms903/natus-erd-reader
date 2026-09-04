@@ -1,6 +1,6 @@
 include README.md LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md CONTRIBUTING.md SECURITY.md
 include pyproject.toml MANIFEST.in
-recursive-include src/natus_erd *.py py.typed *.html *.css *.js
+recursive-include src/natus_erd *.py py.typed
 recursive-include tests *.py
 recursive-include tools *.py
 recursive-include examples *.py

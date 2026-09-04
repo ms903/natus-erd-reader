@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import contextlib
-import io
 import shutil
 import unittest
 import uuid
@@ -15,7 +13,6 @@ from natus_erd import (
     NatusERDReader,
     UnsupportedFormatError,
 )
-from natus_erd.cli import main
 from natus_erd.reader import QUANTUM_UV_SCALE
 
 from ._fixture import SHORTED, build_recording
@@ -119,17 +116,6 @@ class ReaderTests(unittest.TestCase):
         derivative.mkdir()
         with self.assertRaises(UnsupportedFormatError):
             NatusERDReader.open(derivative)
-
-    def test_cli_does_not_print_event_text(self) -> None:
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            return_code = main(["info", str(self.fixture.directory)])
-        self.assertEqual(return_code, 0)
-        text = output.getvalue()
-        self.assertIn("ENT events: 1", text)
-        self.assertNotIn("marker", text)
-        self.assertNotIn("tester", text)
-
 
 if __name__ == "__main__":
     unittest.main()

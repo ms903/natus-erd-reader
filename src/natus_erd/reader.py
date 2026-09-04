@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
-from collections.abc import Sequence
+from collections import OrderedDict
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass
 from numbers import Integral
+import os
 from pathlib import Path
-from typing import TypeAlias
+from threading import RLock
+from typing import TYPE_CHECKING, TypeAlias
 
-import numpy as np
-from numpy.typing import NDArray
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
 
 from .binary import (
     ERD_HEADER_SIZE,
@@ -19,15 +24,17 @@ from .binary import (
     read_erd_header,
     read_etc,
     read_stc,
+    regular_file_size,
 )
-from .decoder import decode_schema9_packet
+from .decoder import decode_schema9_packet, validate_packet_bounds
 from .ent import (
     EntNote,
     channel_names_from_notes,
     events_from_notes,
     read_ent_notes,
 )
-from .errors import DataIntegrityError, UnsupportedFormatError
+from .errors import DataIntegrityError, ResourceLimitError, UnsupportedFormatError
+from .limits import DEFAULT_LIMITS, ReadLimits, check_limit, check_output_size
 from .models import ChannelInfo, Event, RecordingInfo, ValidationReport
 
 ChannelSelector: TypeAlias = int | str | Sequence[int | str] | None
@@ -37,16 +44,28 @@ QUANTUM_HEADBOX_TYPE = 20
 QUANTUM_UV_SCALE = -8711.0 / (2**21 - 0.5)
 
 
+@dataclass(frozen=True, slots=True)
+class _CachedIndex:
+    entries: tuple[EtcEntry, ...]
+    packet_ends: tuple[int, ...]
+    erd_signature: tuple[int, int, int, int]
+    etc_signature: tuple[int, int, int, int]
+
+
 class NatusERDReader:
     """Lazy, read-only access to one native NeuroWorks recording."""
 
-    def __init__(self, stc_path: Path) -> None:
-        self._stc_path = stc_path
-        self._directory = stc_path.parent
-        self._stc = read_stc(stc_path)
+    def __init__(self, stc_path: Path, *, limits: ReadLimits = DEFAULT_LIMITS) -> None:
+        if not isinstance(limits, ReadLimits):
+            raise TypeError("limits must be a ReadLimits instance")
+        self._limits = limits
+        self._cache_lock = RLock()
+        self._stc_path = stc_path.resolve(strict=True)
+        self._directory = self._stc_path.parent
+        self._stc = read_stc(self._stc_path, limits=limits)
         self._segments = self._stc.entries
         self._segment_ends = tuple(segment.end_stamp for segment in self._segments)
-        self._etc_cache: dict[int, tuple[EtcEntry, ...]] = {}
+        self._etc_cache: OrderedDict[int, _CachedIndex] = OrderedDict()
 
         for segment in self._segments:
             erd_path, etc_path = self._segment_paths(segment)
@@ -65,7 +84,7 @@ class NatusERDReader:
         self._uv_scale = QUANTUM_UV_SCALE * (2**self._erd_header.discard_bits)
 
         self._notes = self._load_notes()
-        montage_names = channel_names_from_notes(self._notes)
+        montage_names = channel_names_from_notes(self._notes, limits=self._limits)
         channel_names = list(montage_names[: self._erd_header.n_channels])
         channel_names.extend(
             f"chan{index:03d}"
@@ -110,10 +129,31 @@ class NatusERDReader:
         self._events: tuple[Event, ...] | None = None
 
     @classmethod
-    def open(cls, path: str | Path) -> "NatusERDReader":
-        """Open a recording directory or one of its EEG/STC/ERD files."""
+    def open(
+        cls, path: str | Path, *, limits: ReadLimits = DEFAULT_LIMITS
+    ) -> "NatusERDReader":
+        """Open an explicit recording directory or an EEG/STC/ERD file.
 
-        return cls(_resolve_stc(Path(path)))
+        Metadata access does not import NumPy. Directory discovery is not
+        recursive. Input files must remain unchanged while the reader is used.
+        """
+
+        if not isinstance(limits, ReadLimits):
+            raise TypeError("limits must be a ReadLimits instance")
+        source = Path(path).expanduser().resolve(strict=True)
+        reader = cls(_resolve_stc(source, limits=limits), limits=limits)
+        if source.suffix.casefold() == ".erd" and source.is_file():
+            if not any(
+                source == reader._segment_paths(segment)[0]
+                for segment in reader._segments
+            ):
+                raise DataIntegrityError("The supplied ERD file is not a member of this STC recording")
+        return reader
+
+    @property
+    def limits(self) -> ReadLimits:
+        """The immutable resource budgets used by this reader."""
+        return self._limits
 
     @property
     def info(self) -> RecordingInfo:
@@ -147,7 +187,12 @@ class NatusERDReader:
         channels: ChannelSelector = None,
         units: str = "uV",
     ) -> NDArray[np.float64]:
-        """Read relative samples in the half-open interval ``[start, stop)``."""
+        """Read ``[start, stop)`` as float64 ``(channels, samples)``.
+
+        Budgets are checked before importing NumPy or allocating the result.
+        Requests exceeding a budget raise ResourceLimitError; use iter_samples
+        to process larger intervals without retaining the whole recording.
+        """
 
         start_value = _integer("start", start)
         stop_value = _integer("stop", stop)
@@ -164,31 +209,39 @@ class NatusERDReader:
                 "request auxiliary channels with units='digital'"
             )
 
-        output = np.full(
-            (len(selected), stop_value - start_value), np.nan, dtype=np.float64
-        )
+        check_output_size(len(selected), stop_value - start_value, self._limits)
+        absolute_start = self._origin_stamp + start_value
+        absolute_stop = self._origin_stamp + stop_value
+        # Preflight touched headers and indices before allocating even a valid
+        # output window. The bounded LRU keeps a long traversal from growing RAM.
+        if selected and start_value != stop_value:
+            for segment in self._overlapping_segments(absolute_start, absolute_stop):
+                self._load_etc(segment)
+
+        import numpy as np
+
+        try:
+            output = np.full(
+                (len(selected), stop_value - start_value), np.nan, dtype=np.float64
+            )
+        except MemoryError as exc:
+            raise ResourceLimitError("Cannot allocate output; use a smaller window") from exc
         if start_value == stop_value or not selected:
             return output
 
-        absolute_start = self._origin_stamp + start_value
-        absolute_stop = self._origin_stamp + stop_value
-        segment_index = bisect_left(self._segment_ends, absolute_start)
-
-        for segment in self._segments[segment_index:]:
-            if segment.start_stamp >= absolute_stop:
-                break
+        for segment in self._overlapping_segments(absolute_start, absolute_stop):
             segment_start = max(absolute_start, segment.start_stamp)
             segment_stop = min(absolute_stop, segment.end_stamp + 1)
             if segment_start >= segment_stop:
                 continue
-            entries = self._load_etc(segment)
+            index_data = self._load_etc(segment)
+            entries = index_data.entries
             if not entries:
                 continue
 
-            packet_ends = tuple(entry.end_stamp_exclusive for entry in entries)
-            packet_index = bisect_right(packet_ends, segment_start)
+            packet_index = bisect_right(index_data.packet_ends, segment_start)
             erd_path, _ = self._segment_paths(segment)
-            erd_size = erd_path.stat().st_size
+            erd_size = index_data.erd_signature[0]
             try:
                 stream = erd_path.open("rb")
             except OSError as exc:
@@ -196,6 +249,8 @@ class NatusERDReader:
                     f"Cannot open ERD segment {segment.index}: {exc}"
                 ) from exc
             with stream:
+                if _stat_signature(os.fstat(stream.fileno())) != index_data.erd_signature:
+                    raise DataIntegrityError("ERD changed while opening; reopen a static recording")
                 for index in range(packet_index, len(entries)):
                     entry = entries[index]
                     if entry.sample_stamp >= segment_stop:
@@ -209,7 +264,9 @@ class NatusERDReader:
                         if index + 1 < len(entries)
                         else erd_size
                     )
-                    decoded = decode_schema9_packet(
+                    destination_start = take_start - absolute_start
+                    destination_stop = take_stop - absolute_start
+                    decode_schema9_packet(
                         stream,
                         offset=entry.offset,
                         byte_end=byte_end,
@@ -219,21 +276,57 @@ class NatusERDReader:
                         n_channels=self._erd_header.n_channels,
                         shorted=self._erd_header.shorted,
                         selected=selected,
+                        limits=self._limits,
+                        out=output[:, destination_start:destination_stop],
                     )
-                    destination_start = take_start - absolute_start
-                    destination_stop = take_stop - absolute_start
-                    output[:, destination_start:destination_stop] = decoded
+                if _stat_signature(os.fstat(stream.fileno())) != index_data.erd_signature:
+                    raise DataIntegrityError("ERD changed while reading; reopen a static recording")
 
         if units == "uV":
             output *= self._uv_scale
         return output
 
+    def _overlapping_segments(self, start: int, stop: int) -> Iterator[StcEntry]:
+        index = bisect_left(self._segment_ends, start)
+        while index < len(self._segments):
+            segment = self._segments[index]
+            if segment.start_stamp >= stop:
+                break
+            yield segment
+            index += 1
+
+    def iter_samples(
+        self, start: int = 0, stop: int | None = None, *,
+        chunk_samples: int = 20_480, channels: ChannelSelector = None, units: str = "uV",
+    ) -> Iterator[NDArray[np.float64]]:
+        """Yield successive independent arrays, retaining no earlier chunks.
+
+        Each chunk is subject to the same limits as read_samples. Keeping all
+        yielded arrays in a list defeats streaming and uses caller-owned RAM.
+        """
+        first = _integer("start", start)
+        last = self.info.n_samples if stop is None else _integer("stop", stop)
+        chunk = _integer("chunk_samples", chunk_samples)
+        if not 0 <= first <= last <= self.info.n_samples:
+            raise IndexError("iterator sample bounds are outside the recording")
+        if chunk <= 0:
+            raise ValueError("chunk_samples must be positive")
+        selected = self._resolve_channels(channels)
+        if units not in ("uV", "digital"):
+            raise ValueError("units must be 'uV' or 'digital'")
+        if units == "uV" and any(index >= SIGNAL_CHANNEL_COUNT for index in selected):
+            raise UnsupportedFormatError("Auxiliary channels require units='digital'")
+        check_output_size(len(selected), min(chunk, last - first), self._limits)
+        for sample in range(first, last, chunk):
+            yield self.read_samples(sample, min(sample + chunk, last), selected, units)
+
     def read_events(self) -> tuple[Event, ...]:
         """Return safely parsed ENT events sorted by native stamp."""
 
-        if self._events is None:
-            self._events = events_from_notes(self._notes, self._origin_stamp)
-        return self._events
+        with self._cache_lock:
+            if self._events is None:
+                self._events = events_from_notes(self._notes, self._origin_stamp)
+            return self._events
 
     def validate(self, *, deep: bool = True) -> ValidationReport:
         """Validate file pairs, headers, ETC offsets, and timestamp coverage."""
@@ -242,7 +335,6 @@ class NatusERDReader:
         stored_samples = 0
         missing_samples = 0
         coverage_cursor = self._origin_stamp
-        expected_header = _header_signature(self._erd_header)
 
         for segment in self._segments:
             erd_path, etc_path = self._segment_paths(segment)
@@ -251,13 +343,10 @@ class NatusERDReader:
                     f"Missing ERD/ETC pair for STC segment {segment.index}"
                 )
             if deep:
-                actual_header = read_erd_header(erd_path)
-                if _header_signature(actual_header) != expected_header:
-                    raise DataIntegrityError(
-                        f"ERD header differs in segment {segment.index}"
-                    )
+                with self._cache_lock:
+                    self._etc_cache.pop(segment.index, None)
 
-            entries = self._load_etc(segment)
+            entries = self._load_etc(segment).entries
             packet_count += len(entries)
             for entry in entries:
                 if (
@@ -311,6 +400,8 @@ class NatusERDReader:
             unsupported.append(f"base schema {header.generic.base_schema}")
         if header.headbox_types[0] != QUANTUM_HEADBOX_TYPE:
             unsupported.append(f"headbox type {header.headbox_types[0]}")
+        if any(header.headbox_types[1:]):
+            unsupported.append("multiple headboxes")
         if header.n_channels != 276:
             unsupported.append(f"{header.n_channels} channels")
         if header.sample_rate != 2048.0:
@@ -319,6 +410,8 @@ class NatusERDReader:
             unsupported.append(f"delta width {header.delta_bits}")
         if header.discard_bits != 6:
             unsupported.append(f"discard width {header.discard_bits}")
+        if header.physical_channels != tuple(range(header.n_channels)):
+            unsupported.append("nonidentity physical-channel layout")
         if any(factor != 32767 for factor in header.frequency_factors):
             unsupported.append("per-channel frequency factors")
         if unsupported:
@@ -330,29 +423,52 @@ class NatusERDReader:
         stem = segment.segment_name
         if stem.lower().endswith(".erd"):
             stem = stem[:-4]
-        return self._directory / f"{stem}.erd", self._directory / f"{stem}.etc"
+        return (
+            self._safe_sibling(self._directory / f"{stem}.erd"),
+            self._safe_sibling(self._directory / f"{stem}.etc"),
+        )
+
+    def _safe_sibling(self, path: Path) -> Path:
+        try:
+            resolved = path.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise DataIntegrityError(f"Missing or inaccessible recording file: {path.name}") from exc
+        if resolved.parent != self._directory:
+            raise DataIntegrityError("A recording file resolves outside its directory")
+        regular_file_size(resolved)
+        return resolved
 
     def _load_notes(self) -> tuple[EntNote, ...]:
         ent_path = self._stc_path.with_suffix(".ent")
-        if not ent_path.is_file():
+        if not ent_path.exists() and not ent_path.is_symlink():
             ent_path = self._stc_path.with_suffix(".ent.old")
-        if not ent_path.is_file():
+        if not ent_path.exists() and not ent_path.is_symlink():
             return ()
-        return read_ent_notes(ent_path)
+        return read_ent_notes(self._safe_sibling(ent_path), limits=self._limits)
 
-    def _load_etc(self, segment: StcEntry) -> tuple[EtcEntry, ...]:
-        cached = self._etc_cache.get(segment.index)
-        if cached is not None:
-            return cached
+    def _load_etc(self, segment: StcEntry) -> _CachedIndex:
+        with self._cache_lock:
+            return self._load_etc_locked(segment)
+
+    def _load_etc_locked(self, segment: StcEntry) -> _CachedIndex:
         erd_path, etc_path = self._segment_paths(segment)
         try:
-            erd_size = erd_path.stat().st_size
+            erd_signature = _stat_signature(erd_path.stat())
+            etc_signature = _stat_signature(etc_path.stat())
         except OSError as exc:
-            raise DataIntegrityError(
-                f"Cannot stat ERD segment {segment.index}: {exc}"
-            ) from exc
-        entries = read_etc(etc_path, erd_size=erd_size)
-        for entry in entries:
+            raise DataIntegrityError(f"Cannot stat segment {segment.index}: {exc}") from exc
+        cached = self._etc_cache.get(segment.index)
+        if cached is not None:
+            if (erd_signature, etc_signature) != (cached.erd_signature, cached.etc_signature):
+                raise DataIntegrityError("Recording changed after indexing; reopen a static recording")
+            self._etc_cache.move_to_end(segment.index)
+            return cached
+        actual_header = read_erd_header(erd_path)
+        self._check_supported_header(actual_header)
+        if _header_signature(actual_header) != _header_signature(self._erd_header):
+            raise DataIntegrityError(f"ERD header differs in segment {segment.index}")
+        entries = read_etc(etc_path, erd_size=erd_signature[0], limits=self._limits)
+        for index, entry in enumerate(entries):
             if (
                 entry.sample_stamp < segment.start_stamp
                 or entry.end_stamp_exclusive > segment.end_stamp + 1
@@ -360,8 +476,23 @@ class NatusERDReader:
                 raise DataIntegrityError(
                     f"ETC packet {entry.index} is outside STC segment {segment.index}"
                 )
-        self._etc_cache[segment.index] = entries
-        return entries
+            byte_end = entries[index + 1].offset if index + 1 < len(entries) else erd_signature[0]
+            validate_packet_bounds(
+                offset=entry.offset, byte_end=byte_end, sample_count=entry.sample_span,
+                n_channels=actual_header.n_channels, shorted=actual_header.shorted,
+                limits=self._limits,
+            )
+        if entries and entries[0].offset != ERD_HEADER_SIZE:
+            raise DataIntegrityError("Unindexed bytes precede the first ERD packet")
+        if not entries and erd_signature[0] != ERD_HEADER_SIZE:
+            raise DataIntegrityError("ERD contains payload but its ETC index is empty")
+        if (_stat_signature(erd_path.stat()), _stat_signature(etc_path.stat())) != (erd_signature, etc_signature):
+            raise DataIntegrityError("Recording changed while indexing")
+        value = _CachedIndex(entries, tuple(entry.end_stamp_exclusive for entry in entries), erd_signature, etc_signature)
+        self._etc_cache[segment.index] = value
+        while len(self._etc_cache) > self._limits.max_cached_segments:
+            self._etc_cache.popitem(last=False)
+        return value
 
     def _resolve_channels(self, channels: ChannelSelector) -> tuple[int, ...]:
         if channels is None:
@@ -373,8 +504,11 @@ class NatusERDReader:
         else:
             raise TypeError("channels must be names, integer indices, or a sequence")
 
+        check_limit(len(requested), self._limits.max_selected_channels, "Selected channel count")
+
         resolved: list[int] = []
         for selector in requested:
+            check_limit(len(resolved) + 1, self._limits.max_selected_channels, "Selected channel count")
             if isinstance(selector, str):
                 if selector not in self._name_lookup:
                     raise KeyError(f"Unknown channel name: {selector}")
@@ -398,6 +532,10 @@ def _integer(name: str, value: int) -> int:
     return int(value)
 
 
+def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int]:
+    return (value.st_size, value.st_mtime_ns, value.st_dev, value.st_ino)
+
+
 def _header_signature(header: ErdHeader) -> tuple[object, ...]:
     return (
         header.generic.file_schema,
@@ -413,13 +551,13 @@ def _header_signature(header: ErdHeader) -> tuple[object, ...]:
     )
 
 
-def _resolve_stc(path: Path) -> Path:
+def _resolve_stc(path: Path, *, limits: ReadLimits = DEFAULT_LIMITS) -> Path:
     try:
         resolved = path.expanduser().resolve(strict=True)
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         raise FileNotFoundError(path) from exc
     if any(part.casefold() == "decimated" for part in resolved.parts):
-        raise UnsupportedFormatError("The Decimated derivative is outside v1 scope")
+        raise UnsupportedFormatError("The Decimated derivative is outside the supported scope")
 
     if resolved.is_file():
         suffix = resolved.suffix.casefold()
@@ -427,27 +565,32 @@ def _resolve_stc(path: Path) -> Path:
             return resolved
         if suffix not in {".eeg", ".erd"}:
             raise ValueError("Expected a recording directory or EEG/STC/ERD file")
-        if suffix == ".eeg":
-            matching = resolved.with_suffix(".stc")
-            if matching.is_file():
-                return matching
-        candidates = sorted(resolved.parent.glob("*.stc"))
+        directory = resolved.parent
     elif resolved.is_dir():
-        candidates = sorted(resolved.glob("*.stc"))
-        if not candidates:
-            candidates = sorted(
-                candidate
-                for candidate in resolved.rglob("*.stc")
-                if not any(
-                    part.casefold() == "decimated"
-                    for part in candidate.relative_to(resolved).parts
-                )
-            )
+        directory = resolved
     else:
         raise ValueError("Expected a recording directory or EEG/STC/ERD file")
 
+    candidates: list[Path] = []
+    with os.scandir(directory) as entries:
+        for count, entry in enumerate(entries, 1):
+            check_limit(count, limits.max_directory_entries, "Recording directory entries")
+            if entry.name.casefold().endswith(".stc"):
+                candidate = Path(entry.path).resolve(strict=True)
+                if candidate.parent != directory:
+                    raise DataIntegrityError("STC link resolves outside the recording directory")
+                regular_file_size(candidate)
+                candidates.append(candidate)
+    if resolved.is_file() and resolved.suffix.casefold() == ".eeg":
+        matching = [candidate for candidate in candidates if candidate.stem.casefold() == resolved.stem.casefold()]
+        if len(matching) == 1:
+            return matching[0]
+        if not matching:
+            raise FileNotFoundError("No STC matches the supplied EEG file")
+        raise DataIntegrityError("Multiple STC files match the supplied EEG file")
+
     if not candidates:
-        raise FileNotFoundError("No STC file was found")
+        raise FileNotFoundError("No STC file found; pass the recording directory itself (discovery is not recursive)")
     if len(candidates) != 1:
         raise DataIntegrityError(
             f"Expected one main STC file, found {len(candidates)}"

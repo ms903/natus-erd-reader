@@ -15,7 +15,6 @@ class SyntheticRecording:
     stc: Path
     eeg: Path
     first_erd: Path
-    edf: Path
     expected: tuple[tuple[int | None, ...], ...]
 
 
@@ -38,7 +37,7 @@ def build_recording(root: Path) -> SyntheticRecording:
             erd.extend(packet)
         (directory / f"{segment_name}.erd").write_bytes(erd)
 
-        etc = bytearray(_generic_header(1))
+        etc = bytearray(_generic_header(3))
         sample_number = 0
         for offset, stamp, samples in zip(
             offsets, packet_stamps[segment_index], packet_groups[segment_index]
@@ -67,14 +66,11 @@ def build_recording(root: Path) -> SyntheticRecording:
                 + [sample[channel] for sample in stored[5:9]]
             )
         )
-    edf = root / "export.edf"
-    edf.write_bytes(_edf_file(tuple(expected_by_channel)))
     return SyntheticRecording(
         directory=directory,
         stc=stc,
         eeg=eeg,
         first_erd=directory / f"{stem}.erd",
-        edf=edf,
         expected=tuple(expected_by_channel),
     )
 
@@ -184,7 +180,7 @@ def _ent_file() -> bytes:
         '(.(."Stamp", 1001), (."Text", "marker"), '
         '(."Data", (.(."User", "tester"))))'
     )
-    output = bytearray(_generic_header(1))
+    output = bytearray(_generic_header(3))
     previous_length = 0
     for note_type, text in ((2, montage), (1, event)):
         payload = text.encode("utf-8") + b"\0\0"
@@ -194,62 +190,3 @@ def _ent_file() -> bytes:
         previous_length = length
     output.extend(bytes(16))
     return bytes(output)
-
-
-def _edf_file(expected: tuple[tuple[int | None, ...], ...]) -> bytes:
-    n_raw_signals = N_CHANNELS + 1
-    header_bytes = 256 + n_raw_signals * 256
-
-    def field(value: object, width: int) -> bytes:
-        encoded = str(value).encode("ascii")
-        if len(encoded) > width:
-            raise AssertionError(f"EDF field is wider than {width}: {value}")
-        return encoded.ljust(width, b" ")
-
-    fixed = bytearray()
-    fixed.extend(field("0", 8))
-    fixed.extend(field("synthetic", 80))
-    fixed.extend(field("synthetic", 80))
-    fixed.extend(field("01.01.24", 8))
-    fixed.extend(field("00.00.00", 8))
-    fixed.extend(field(header_bytes, 8))
-    fixed.extend(field("EDF+C", 44))
-    fixed.extend(field(1, 8))
-    fixed.extend(field("0.03125", 8))
-    fixed.extend(field(n_raw_signals, 4))
-    if len(fixed) != 256:
-        raise AssertionError("invalid synthetic EDF fixed header")
-
-    labels = [f"CH{channel:03d}" for channel in range(N_CHANNELS)] + [
-        "EDF Annotations"
-    ]
-    signal_header = bytearray()
-    for values, width in (
-        (labels, 16),
-        ([""] * n_raw_signals, 80),
-        (["uV"] * N_CHANNELS + [""], 8),
-        (["8711"] * N_CHANNELS + ["-1"], 8),
-        (["-8711"] * N_CHANNELS + ["1"], 8),
-        (["-32768"] * n_raw_signals, 8),
-        (["32767"] * n_raw_signals, 8),
-        ([""] * n_raw_signals, 80),
-        (["64"] * n_raw_signals, 8),
-        ([""] * n_raw_signals, 32),
-    ):
-        for value in values:
-            signal_header.extend(field(value, width))
-    if len(signal_header) != n_raw_signals * 256:
-        raise AssertionError("invalid synthetic EDF signal header")
-
-    record = bytearray()
-    for channel in range(N_CHANNELS):
-        values = []
-        for value in expected[channel]:
-            if value is None:
-                values.append(0)
-            else:
-                values.append(max(-32768, min(32767, value)))
-        values.extend([0] * (64 - len(values)))
-        record.extend(pack("<64h", *values))
-    record.extend(bytes(64 * 2))
-    return bytes(fixed + signal_header + record)

@@ -21,11 +21,26 @@ synthetic reproducer where possible.
 Keep unsupported schemas and headboxes explicit. Do not silently reuse the
 Quantum calibration for unverified hardware. Changes to packet decoding need
 tests for absolute values, delta sentinels, shorted channels and packet edges.
+Resource-boundary tests must intercept oversized requests or use synthetic
+bounded input; do not actually allocate gigabytes to test rejection paths.
+Keep metadata-only imports free of NumPy and never alter the user's global
+numerical-backend settings from package code.
+
+CI sets `OPENBLAS_NUM_THREADS=1` and `OMP_NUM_THREADS=1` for the test runner
+to keep backend initialization predictable. These are application-side test
+settings, not package behavior or a substitute for an operating-system memory
+limit. Backend-specific failure diagnosis should record the actual environment
+and avoid unsafe reproduction on a user's machine.
+
+The installed distribution exposes Python APIs only. Do not add executables,
+web assets, EDF readers, optional plotting dependencies or real data to it.
+`tools/check_dist.py` is a development audit script, not an installed command.
 
 ## Release checklist
 
 1. Update the versions in `pyproject.toml` and `src/natus_erd/__init__.py`.
-2. Update `CHANGELOG.md`; run the unit suite and distribution audit.
+2. Update `CHANGELOG.md`; run the unit suite and distribution audit from a
+   clean staging tree so removed files cannot survive in build caches.
 3. Confirm `git ls-files` contains no recordings, reports or credentials.
 4. Merge to `main` and wait for CI to succeed.
 5. Push an annotated `vX.Y.Z` tag. The release workflow builds and attaches a

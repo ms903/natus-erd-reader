@@ -11,3 +11,11 @@ class UnsupportedFormatError(NatusERDError):
 
 class DataIntegrityError(NatusERDError):
     """A NeuroWorks file is truncated, inconsistent, or otherwise corrupt."""
+
+
+class ResourceLimitError(DataIntegrityError):
+    """A request or file exceeds an explicit reader resource budget.
+
+    This does not necessarily mean the file is corrupt. Use smaller windows,
+    or explicitly choose appropriate :class:`ReadLimits` for trusted data.
+    """

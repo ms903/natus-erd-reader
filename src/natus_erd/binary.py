@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
+import os
 from pathlib import Path
+import stat
 from struct import Struct, unpack_from
 
-from .errors import DataIntegrityError
+from .errors import DataIntegrityError, UnsupportedFormatError
+from .limits import DEFAULT_LIMITS, ReadLimits, check_limit
 
 GENERIC_HEADER_SIZE = 352
 ERD_HEADER_SIZE = 8656
@@ -67,11 +71,51 @@ class EtcEntry:
         return self.sample_stamp + self.sample_span
 
 
-def _read_file(path: Path) -> bytes:
+def regular_file_size(path: Path) -> int:
+    """Reject special files before opening them (e.g. named pipes/devices)."""
     try:
-        return path.read_bytes()
+        info = path.stat()
+    except OSError as exc:
+        raise DataIntegrityError(f"Cannot stat {path.name}: {exc}") from exc
+    if not stat.S_ISREG(info.st_mode):
+        raise DataIntegrityError(f"Expected a regular file: {path.name}")
+    return info.st_size
+
+
+def _read_file(path: Path, *, maximum: int) -> bytes:
+    """Check size before allocation and use a finite read even if a file grows."""
+    size = regular_file_size(path)
+    check_limit(size, maximum, "Metadata file bytes")
+    try:
+        with path.open("rb") as stream:
+            if os.fstat(stream.fileno()).st_size != size:
+                raise DataIntegrityError("Metadata changed while opening")
+            data = stream.read(size)
+            if len(data) != size or stream.read(1):
+                raise DataIntegrityError("Metadata changed or was truncated while reading")
     except OSError as exc:
         raise DataIntegrityError(f"Cannot read {path.name}: {exc}") from exc
+    return data
+
+
+def check_generic_schema(header: GenericHeader, expected: int, context: str) -> None:
+    if header.file_schema != expected or header.base_schema != 1:
+        raise UnsupportedFormatError(
+            f"Unsupported {context} schema {header.file_schema}, base {header.base_schema}"
+        )
+
+
+def _safe_segment_name(name: str) -> bool:
+    # Windows device/drive/alternate-stream names are unsafe even on POSIX.
+    if not name or name in {".", ".."} or name[-1] in " .":
+        return False
+    if any(char in '<>:"/\\|?*' or ord(char) < 32 for char in name):
+        return False
+    device = name.split(".", 1)[0].upper()
+    return device not in {"CON", "PRN", "AUX", "NUL", "CLOCK$", "CONIN$", "CONOUT$"} and not (
+        len(device) == 4 and device[:3] in {"COM", "LPT"}
+        and device[3] in "123456789\u00b9\u00b2\u00b3"
+    )
 
 
 def _generic_from_bytes(data: bytes, path: Path) -> GenericHeader:
@@ -85,6 +129,7 @@ def _generic_from_bytes(data: bytes, path: Path) -> GenericHeader:
 
 
 def read_generic_header(path: Path) -> GenericHeader:
+    regular_file_size(path)
     try:
         with path.open("rb") as stream:
             data = stream.read(GENERIC_HEADER_SIZE)
@@ -94,6 +139,7 @@ def read_generic_header(path: Path) -> GenericHeader:
 
 
 def read_erd_header(path: Path) -> ErdHeader:
+    regular_file_size(path)
     try:
         with path.open("rb") as stream:
             data = stream.read(ERD_HEADER_SIZE)
@@ -105,12 +151,15 @@ def read_erd_header(path: Path) -> ErdHeader:
             f"{path.name} is shorter than the {ERD_HEADER_SIZE}-byte ERD header"
         )
     generic = _generic_from_bytes(data, path)
+    check_generic_schema(generic, 9, "ERD")
     sample_rate = unpack_from("<d", data, 352)[0]
     n_channels, delta_bits = unpack_from("<ii", data, 360)
     if not 1 <= n_channels <= 1024:
         raise DataIntegrityError(
             f"{path.name} declares an invalid channel count: {n_channels}"
         )
+    if not isfinite(sample_rate) or sample_rate <= 0:
+        raise DataIntegrityError("ERD sample rate must be finite and positive")
     physical = unpack_from(f"<{n_channels}i", data, 368)
     headbox_values = unpack_from("<4i", data, 4464)
     headbox_types: tuple[int, int, int, int] = (
@@ -121,6 +170,8 @@ def read_erd_header(path: Path) -> ErdHeader:
     )
     discard_bits = unpack_from("<i", data, 4556)[0]
     shorted_raw = unpack_from("<1024h", data, 4560)[:n_channels]
+    if any(value not in (0, 1) for value in shorted_raw):
+        raise DataIntegrityError("ERD shorted flags must be zero or one")
     frequency_factors = unpack_from("<1024h", data, 6608)[:n_channels]
     return ErdHeader(
         generic=generic,
@@ -135,9 +186,12 @@ def read_erd_header(path: Path) -> ErdHeader:
     )
 
 
-def read_stc(path: Path) -> StcFile:
-    data = _read_file(path)
+def read_stc(path: Path, *, limits: ReadLimits = DEFAULT_LIMITS) -> StcFile:
+    data = _read_file(
+        path, maximum=min(limits.max_metadata_bytes, STC_PREFIX_SIZE + limits.max_segments * STC_ENTRY_SIZE)
+    )
     generic = _generic_from_bytes(data, path)
+    check_generic_schema(generic, 1, "STC")
     if len(data) < STC_PREFIX_SIZE:
         raise DataIntegrityError(f"{path.name} has a truncated STC prefix")
     payload_size = len(data) - STC_PREFIX_SIZE
@@ -148,6 +202,7 @@ def read_stc(path: Path) -> StcFile:
 
     next_segment, final = unpack_from("<ii", data, GENERIC_HEADER_SIZE)
     entries: list[StcEntry] = []
+    names: set[str] = set()
     for index, offset in enumerate(
         range(STC_PREFIX_SIZE, len(data), STC_ENTRY_SIZE)
     ):
@@ -158,8 +213,12 @@ def read_stc(path: Path) -> StcFile:
             raise DataIntegrityError(
                 f"STC segment {index} has an invalid UTF-8 name"
             ) from exc
-        if not name or "/" in name or "\\" in name:
+        if not _safe_segment_name(name):
             raise DataIntegrityError(f"STC segment {index} has an unsafe name")
+        stem = name[:-4] if name.casefold().endswith(".erd") else name
+        if not _safe_segment_name(stem) or stem.casefold() in names:
+            raise DataIntegrityError(f"STC segment {index} has an unsafe or duplicate stem")
+        names.add(stem.casefold())
         start, end, sample_number, span = unpack_from("<4i", data, offset + 256)
         if end < start or span != end - start + 1:
             raise DataIntegrityError(
@@ -179,9 +238,13 @@ def read_stc(path: Path) -> StcFile:
 _ETC_STRUCT = Struct("<iiihh")
 
 
-def read_etc(path: Path, *, erd_size: int | None = None) -> tuple[EtcEntry, ...]:
-    data = _read_file(path)
-    _generic_from_bytes(data, path)
+def read_etc(
+    path: Path, *, erd_size: int | None = None, limits: ReadLimits = DEFAULT_LIMITS
+) -> tuple[EtcEntry, ...]:
+    data = _read_file(
+        path, maximum=min(limits.max_metadata_bytes, GENERIC_HEADER_SIZE + limits.max_packets_per_segment * ETC_ENTRY_SIZE)
+    )
+    check_generic_schema(_generic_from_bytes(data, path), 3, "ETC")
     payload_size = len(data) - GENERIC_HEADER_SIZE
     if payload_size % ETC_ENTRY_SIZE:
         raise DataIntegrityError(
