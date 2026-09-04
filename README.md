@@ -20,25 +20,29 @@ driver, hardware or numerical-library failures.
 
 ## Installation
 
-With Python 3.10 or newer, install **0.2.1** directly from GitHub Releases
-(no Git installation or manual download required):
+With Python 3.10 or newer, install the current release from
+[PyPI](https://pypi.org/project/natus-erd-reader/):
 
 ```shell
-python -m pip install --upgrade "https://github.com/ms903/natus-erd-reader/releases/download/v0.2.1/natus_erd_reader-0.2.1-py3-none-any.whl"
+python -m pip install --upgrade natus-erd-reader
 ```
 
 Run this command in the Python environment where you want to use the reader.
 NumPy is installed automatically if needed. To preserve an existing,
 compatible NumPy installation, add `--no-deps`.
 
-Once the version is available on [PyPI](https://pypi.org/project/natus-erd-reader/),
-it can also be installed by name:
+To install the exact **0.2.1** release:
 
 ```shell
 python -m pip install --upgrade "natus-erd-reader==0.2.1"
 ```
 
-The GitHub Release command above does not depend on PyPI availability.
+Alternatively, install its wheel directly from GitHub Releases (no Git
+installation or manual download required):
+
+```shell
+python -m pip install --upgrade "https://github.com/ms903/natus-erd-reader/releases/download/v0.2.1/natus_erd_reader-0.2.1-py3-none-any.whl"
+```
 
 Check the installed version without loading NumPy or opening a recording:
 
