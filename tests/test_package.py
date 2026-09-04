@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import unittest
 from importlib.resources import files
 
@@ -20,6 +23,18 @@ class PackageContractTests(unittest.TestCase):
         html = root.joinpath("web", "index.html").read_text(encoding="utf-8")
         self.assertIn('/assets/app.js', html)
         self.assertNotIn('<script src="http', html)
+
+    def test_viewer_help_works_with_legacy_console_encoding(self) -> None:
+        environment = os.environ.copy()
+        environment["PYTHONIOENCODING"] = "cp1252:strict"
+        completed = subprocess.run(
+            [sys.executable, "-m", "natus_erd.viewer", "--help"],
+            env=environment,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode("ascii", errors="replace"))
+        self.assertIn(b"synchronized Natus ERD and EDF", completed.stdout)
 
 
 if __name__ == "__main__":

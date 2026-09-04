@@ -281,7 +281,7 @@ def create_server(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="natus-erd-viewer",
-        description="本地同步浏览 Natus ERD 和对应 EDF 波形",
+        description="Browse synchronized Natus ERD and EDF waveforms locally",
     )
     parser.add_argument("recording", nargs="?", default="data")
     parser.add_argument("--edf", type=Path)
@@ -323,9 +323,9 @@ def _discover_edf(recording: Path) -> Path:
             break
     found = sorted(candidates)
     if not found:
-        raise FileNotFoundError("未找到对应的 EDF 文件，请使用 --edf 指定")
+        raise FileNotFoundError("No EDF file found; select one with --edf")
     if len(found) != 1:
-        raise ValueError(f"找到 {len(found)} 个 EDF 文件，请使用 --edf 指定")
+        raise ValueError(f"Found {len(found)} EDF files; select one with --edf")
     return found[0]
 
 
