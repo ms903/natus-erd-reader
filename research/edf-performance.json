@@ -1,0 +1,58 @@
+{
+  "environment": "Windows x64, CPython 3.12.6, NumPy 2.5.2, native threads; source on E:, output on D:",
+  "scope": "Same 512 Hz source, same start, no events, nominal extrapolation; rc1 defaults 272 channels, rc2 defaults 276. Warm-cache observations, not throughput guarantees. Buffer budget is 256 MiB; RSS includes interpreter, metadata and temporary arrays.",
+  "runs": [
+    {
+      "version": "baseline",
+      "seconds": 60,
+      "backend": "native",
+      "workers": 4,
+      "scan": 0.04909620000398718,
+      "write": 0.20587569999042898,
+      "verify": 70.95331360001,
+      "total": 71.25924860000669,
+      "peak_rss": 55414784,
+      "incremental_rss": 29650944,
+      "file_bytes": 16788224
+    },
+    {
+      "version": "baseline",
+      "seconds": 600,
+      "backend": "native",
+      "workers": 4,
+      "scan": 0.2824731000000611,
+      "write": 1.052720899999258,
+      "verify": 62.99808410000696,
+      "total": 64.34453449999273,
+      "peak_rss": 136912896,
+      "incremental_rss": 99303424,
+      "file_bytes": 167250944
+    },
+    {
+      "version": "rc2",
+      "seconds": 60,
+      "backend": "native",
+      "workers": 4,
+      "scan": 0.02903590000641998,
+      "write": 0.22285479999845847,
+      "verify": 0.18754479999188334,
+      "total": 0.4526462000067113,
+      "peak_rss": 82112512,
+      "incremental_rss": 55541760,
+      "file_bytes": 17035008
+    },
+    {
+      "version": "rc2",
+      "seconds": 600,
+      "backend": "native",
+      "workers": 4,
+      "scan": 0.9989872000005562,
+      "write": 0.6783475999982329,
+      "verify": 0.2163927999936277,
+      "total": 1.9001118000014685,
+      "peak_rss": 132775936,
+      "incremental_rss": 94953472,
+      "file_bytes": 169709568
+    }
+  ]
+}

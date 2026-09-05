@@ -25,6 +25,8 @@ from .errors import DataIntegrityError, UnsupportedFormatError
 from .limits import DEFAULT_LIMITS, ReadLimits, check_limit
 
 
+BEIJING = "UTC+08:00"
+
 _HEADER_BYTES = 352
 _ENTRY_BYTES = 12
 _SNC_GUID = bytes.fromhex("d2a98660af60d311986000104b75c151")
@@ -109,11 +111,11 @@ class ClockEstimate:
             raise ValueError("Unknown clock estimate kind")
         object.__setattr__(self, "filetime_ticks", ticks)
 
-    def to_datetime(self, timezone: str | tzinfo) -> datetime:
-        """Return an aware datetime in an explicitly supplied timezone.
+    def to_datetime(self, timezone: str | tzinfo = BEIJING) -> datetime:
+        """Return an aware datetime, defaulting to fixed Beijing UTC+08:00.
 
-        FILETIME is interpreted using its UTC epoch. ``"UTC"`` needs no
-        timezone database; other strings are IANA ``zoneinfo`` keys and fail
+        FILETIME is interpreted using its UTC epoch. ``"UTC+08:00"`` and
+        ``"UTC"`` need no timezone database; other strings are IANA ``zoneinfo`` keys and fail
         if that zone is unavailable. No local timezone is guessed.
 
         Python datetime has microsecond resolution. This conversion rounds
@@ -123,7 +125,8 @@ class ClockEstimate:
         """
         target: tzinfo
         if isinstance(timezone, str):
-            target = _timezone.utc if timezone == "UTC" else ZoneInfo(timezone)
+            target = (_timezone(timedelta(hours=8)) if timezone == BEIJING
+                      else _timezone.utc if timezone == "UTC" else ZoneInfo(timezone))
         elif isinstance(timezone, tzinfo):
             target = timezone
         else:

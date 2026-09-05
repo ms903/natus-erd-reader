@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0rc2
+
+- Use fixed Beijing UTC+08:00 by default for clocks and EDF export.
+- Display scan, write and verification progress with tqdm; support disabling or callbacks.
+- Preserve all selected channels, including shorted channels with digital 32767.
+- Apply official Quantum auxiliary units, negative-gain calibration and verified missing codes.
+- Batch sequential readback with bounded worker queues and batched source windows.
+- Report channel units and separate verification timing.
+- Provide direct scripts and an anonymous EDF+D development design.
+
 ## 0.3.0rc1
 
 - Add SNC schema-1 clocks and stored-range discovery.

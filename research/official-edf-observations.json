@@ -1,0 +1,803 @@
+[
+  {
+    "last_record_codes": {
+      "0": {
+        "zero_count": 56,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "249": {
+        "zero_count": 56,
+        "max_code_count": 8,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "256": {
+        "zero_count": 56,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "272": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "273": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "274": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "275": {
+        "zero_count": 8,
+        "max_code_count": 56,
+        "last_code": 32767,
+        "scope": "last 64-sample record only"
+      }
+    },
+    "case": 1,
+    "kind": "complete",
+    "records": 2763194,
+    "record_samples": 64,
+    "record_duration": "1/32",
+    "sample_rate": "2048",
+    "annotation_bytes": 240,
+    "first_tal": "51/1024",
+    "last_tal": "176943999/2048",
+    "stored_seconds": "1381597/16",
+    "elapsed_record_span": "176943961/2048",
+    "excess_seconds": "99545/2048",
+    "first_record_constant_32767_rows": [
+      249,
+      251,
+      253,
+      255
+    ],
+    "calibration": [
+      {
+        "index": 0,
+        "unit": "uV",
+        "pmin": "8711",
+        "pmax": "-8711",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 256,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 272,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 273,
+        "unit": "%",
+        "pmin": "0",
+        "pmax": "102.3",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 274,
+        "unit": "bpm",
+        "pmin": "0",
+        "pmax": "1023",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 275,
+        "unit": "uV",
+        "pmin": "4.29e+09",
+        "pmax": "32767",
+        "dmin": "-32768",
+        "dmax": "32767"
+      }
+    ]
+  },
+  {
+    "last_record_codes": {
+      "0": {
+        "zero_count": 38,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "249": {
+        "zero_count": 38,
+        "max_code_count": 26,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "256": {
+        "zero_count": 38,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "272": {
+        "zero_count": 38,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "273": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "274": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "275": {
+        "zero_count": 26,
+        "max_code_count": 38,
+        "last_code": 32767,
+        "scope": "last 64-sample record only"
+      }
+    },
+    "case": 2,
+    "kind": "complete",
+    "records": 2745139,
+    "record_samples": 64,
+    "record_duration": "1/32",
+    "sample_rate": "2048",
+    "annotation_bytes": 224,
+    "first_tal": "1975/2048",
+    "last_tal": "88434459/1024",
+    "stored_seconds": "2745139/32",
+    "elapsed_record_span": "176867007/2048",
+    "excess_seconds": "1178111/2048",
+    "first_record_constant_32767_rows": [
+      249,
+      251,
+      253,
+      255
+    ],
+    "calibration": [
+      {
+        "index": 0,
+        "unit": "uV",
+        "pmin": "8711",
+        "pmax": "-8711",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 256,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 272,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 273,
+        "unit": "%",
+        "pmin": "0",
+        "pmax": "102.3",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 274,
+        "unit": "bpm",
+        "pmin": "0",
+        "pmax": "1023",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 275,
+        "unit": "uV",
+        "pmin": "4.29e+09",
+        "pmax": "32767",
+        "dmin": "-32768",
+        "dmax": "32767"
+      }
+    ]
+  },
+  {
+    "last_record_codes": {
+      "0": {
+        "zero_count": 41,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "249": {
+        "zero_count": 41,
+        "max_code_count": 23,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "256": {
+        "zero_count": 41,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "272": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "273": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "274": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "275": {
+        "zero_count": 23,
+        "max_code_count": 41,
+        "last_code": 32767,
+        "scope": "last 64-sample record only"
+      }
+    },
+    "case": 3,
+    "kind": "complete",
+    "records": 2763537,
+    "record_samples": 64,
+    "record_duration": "1/32",
+    "sample_rate": "2048",
+    "annotation_bytes": 224,
+    "first_tal": "111/256",
+    "last_tal": "176869221/2048",
+    "stored_seconds": "2763537/32",
+    "elapsed_record_span": "176868397/2048",
+    "excess_seconds": "2029/2048",
+    "first_record_constant_32767_rows": [
+      249,
+      251,
+      253,
+      255
+    ],
+    "calibration": [
+      {
+        "index": 0,
+        "unit": "uV",
+        "pmin": "8711",
+        "pmax": "-8711",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 256,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 272,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 273,
+        "unit": "%",
+        "pmin": "0",
+        "pmax": "102.3",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 274,
+        "unit": "bpm",
+        "pmin": "0",
+        "pmax": "1023",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 275,
+        "unit": "uV",
+        "pmin": "4.29e+09",
+        "pmax": "32767",
+        "dmin": "-32768",
+        "dmax": "32767"
+      }
+    ]
+  },
+  {
+    "last_record_codes": {
+      "0": {
+        "zero_count": 52,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "249": {
+        "zero_count": 52,
+        "max_code_count": 12,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "256": {
+        "zero_count": 52,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "272": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "273": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "274": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "275": {
+        "zero_count": 12,
+        "max_code_count": 52,
+        "last_code": 32767,
+        "scope": "last 64-sample record only"
+      }
+    },
+    "case": 4,
+    "kind": "complete",
+    "records": 2763534,
+    "record_samples": 64,
+    "record_duration": "1/32",
+    "sample_rate": "2048",
+    "annotation_bytes": 224,
+    "first_tal": "75/256",
+    "last_tal": "88434655/1024",
+    "stored_seconds": "1381767/16",
+    "elapsed_record_span": "88434387/1024",
+    "excess_seconds": "1299/1024",
+    "first_record_constant_32767_rows": [
+      249,
+      251,
+      253,
+      255
+    ],
+    "calibration": [
+      {
+        "index": 0,
+        "unit": "uV",
+        "pmin": "8711",
+        "pmax": "-8711",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 256,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 272,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 273,
+        "unit": "%",
+        "pmin": "0",
+        "pmax": "102.3",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 274,
+        "unit": "bpm",
+        "pmin": "0",
+        "pmax": "1023",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 275,
+        "unit": "uV",
+        "pmin": "4.29e+09",
+        "pmax": "32767",
+        "dmin": "-32768",
+        "dmax": "32767"
+      }
+    ]
+  },
+  {
+    "last_record_codes": {
+      "0": {
+        "zero_count": 2,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "249": {
+        "zero_count": 2,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "256": {
+        "zero_count": 2,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "272": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "273": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "274": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "275": {
+        "zero_count": 62,
+        "max_code_count": 2,
+        "last_code": 32767,
+        "scope": "last 64-sample record only"
+      }
+    },
+    "case": 5,
+    "kind": "complete",
+    "records": 2763528,
+    "record_samples": 64,
+    "record_duration": "1/32",
+    "sample_rate": "2048",
+    "annotation_bytes": 272,
+    "first_tal": "1187/2048",
+    "last_tal": "176867883/2048",
+    "stored_seconds": "345441/4",
+    "elapsed_record_span": "22108345/256",
+    "excess_seconds": "121/256",
+    "first_record_constant_32767_rows": [],
+    "calibration": [
+      {
+        "index": 0,
+        "unit": "uV",
+        "pmin": "8711",
+        "pmax": "-8711",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 256,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 272,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 273,
+        "unit": "%",
+        "pmin": "0",
+        "pmax": "102.3",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 274,
+        "unit": "bpm",
+        "pmin": "0",
+        "pmax": "1023",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 275,
+        "unit": "uV",
+        "pmin": "4.29e+09",
+        "pmax": "32767",
+        "dmin": "-32768",
+        "dmax": "32767"
+      }
+    ]
+  },
+  {
+    "last_record_codes": {
+      "0": {
+        "zero_count": 48,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "249": {
+        "zero_count": 48,
+        "max_code_count": 16,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "256": {
+        "zero_count": 48,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "272": {
+        "zero_count": 48,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "273": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "274": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "275": {
+        "zero_count": 16,
+        "max_code_count": 48,
+        "last_code": 32767,
+        "scope": "last 64-sample record only"
+      }
+    },
+    "case": 6,
+    "kind": "template",
+    "records": 9501,
+    "record_samples": 64,
+    "record_duration": "1/32",
+    "sample_rate": "2048",
+    "annotation_bytes": 592,
+    "first_tal": "1061/2048",
+    "last_tal": "89443045/2048",
+    "stored_seconds": "9501/32",
+    "elapsed_record_span": "349383/8",
+    "excess_seconds": "1388031/32",
+    "first_record_constant_32767_rows": [
+      249,
+      251,
+      253,
+      255
+    ],
+    "calibration": [
+      {
+        "index": 0,
+        "unit": "uV",
+        "pmin": "8711",
+        "pmax": "-8711",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 256,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 272,
+        "unit": "",
+        "pmin": "-32768",
+        "pmax": "32767",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 273,
+        "unit": "%",
+        "pmin": "0",
+        "pmax": "102.3",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 274,
+        "unit": "bpm",
+        "pmin": "0",
+        "pmax": "1023",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 275,
+        "unit": "uV",
+        "pmin": "4.29e+09",
+        "pmax": "32767",
+        "dmin": "-32768",
+        "dmax": "32767"
+      }
+    ],
+    "all_time_jumps": [
+      {
+        "record": 9469,
+        "previous": "607013/2048",
+        "current": "89441061/2048",
+        "gap": "1388031/32"
+      }
+    ]
+  },
+  {
+    "last_record_codes": {
+      "0": {
+        "zero_count": 56,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "249": {
+        "zero_count": 56,
+        "max_code_count": 8,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "256": {
+        "zero_count": 56,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "272": {
+        "zero_count": 56,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "273": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "274": {
+        "zero_count": 64,
+        "max_code_count": 0,
+        "last_code": 0,
+        "scope": "last 64-sample record only"
+      },
+      "275": {
+        "zero_count": 8,
+        "max_code_count": 56,
+        "last_code": 32767,
+        "scope": "last 64-sample record only"
+      }
+    },
+    "case": 7,
+    "kind": "complete",
+    "records": 2757619,
+    "record_samples": 64,
+    "record_duration": "1/32",
+    "sample_rate": "2048",
+    "annotation_bytes": 208,
+    "first_tal": "173/1024",
+    "last_tal": "44237999/512",
+    "stored_seconds": "2757619/32",
+    "elapsed_record_span": "88475857/1024",
+    "excess_seconds": "232049/1024",
+    "first_record_constant_32767_rows": [
+      249,
+      251,
+      253,
+      255
+    ],
+    "calibration": [
+      {
+        "index": 0,
+        "unit": "uV",
+        "pmin": "8711",
+        "pmax": "-8711",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 256,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 272,
+        "unit": "uV",
+        "pmin": "5151600",
+        "pmax": "-5151600",
+        "dmin": "-32768",
+        "dmax": "32767"
+      },
+      {
+        "index": 273,
+        "unit": "%",
+        "pmin": "0",
+        "pmax": "102.3",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 274,
+        "unit": "bpm",
+        "pmin": "0",
+        "pmax": "1023",
+        "dmin": "0",
+        "dmax": "32767"
+      },
+      {
+        "index": 275,
+        "unit": "uV",
+        "pmin": "4.29e+09",
+        "pmax": "32767",
+        "dmin": "-32768",
+        "dmax": "32767"
+      }
+    ]
+  }
+]

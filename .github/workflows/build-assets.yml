@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
-      - run: python -m pip install build setuptools wheel numpy
+      - run: python -m pip install build setuptools wheel numpy tqdm
       - run: python tools/build_artifacts.py --kind pure --output dist
       - name: Test wheel and native rebuild from sdist
         shell: bash

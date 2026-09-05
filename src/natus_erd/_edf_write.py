@@ -22,19 +22,18 @@ def _header(plan, calibrations):
     dt = ClockEstimate(Fraction(plan._header_ticks), "anchor").to_datetime(
         timezone(timedelta(seconds=plan._utc_offset_seconds)))
     months = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
-    fmt = "EDF+C"
     recording = f"Startdate {dt.day:02d}-{months[dt.month-1]}-{dt.year} X X X"
     n = len(plan.channels)
     header = b"".join((_field(0, 8), _field("X X X X", 80), _field(recording, 80),
         _field(dt.strftime("%d.%m.%y"), 8), _field(dt.strftime("%H.%M.%S"), 8),
-        _field(256*(n+2), 8), _field(fmt, 44), _field(plan.record_count, 8),
+        _field(256*(n+2), 8), _field("EDF+C", 44), _field(plan.record_count, 8),
         _field(plan.record_duration_text, 8), _field(n+1, 4)))
     fields = ((16, [label for _, _, label in plan.channel_labels]+["EDF Annotations"]), (80, [""]*(n+1)),
-        (8, ["" if c >= 256 else "uV" for c in plan.channels]+[""]),
+        (8, list(plan.channel_units)+[""]),
         (8, [c.pmin for c in calibrations]+["-1"]), (8, [c.pmax for c in calibrations]+["1"]),
         (8, [c.dmin for c in calibrations]+[-32768]), (8, [c.dmax for c in calibrations]+[32767]),
         (80, [""]*(n+1)), (8, [plan.record_samples]*n+[plan.annotation_bytes//2]), (32, [""]*(n+1)))
-    return header+b"".join(_field(v, width) for width, values in fields for v in values), fmt
+    return header+b"".join(_field(v, width) for width, values in fields for v in values)
 
 
 def write_export(reader, path, *, max_error_uv, progress, **options):
@@ -71,6 +70,8 @@ def write_export(reader, path, *, max_error_uv, progress, **options):
         raise ResourceLimitError("Insufficient free space for the bounded EDF output")
     scan_start = time.perf_counter()
     stats, last_notice, completed = None, scan_start, 0
+    if progress:
+        progress({"stage": "range_scan", "samples": 0, "total": plan.logical_samples})
     for _, width, values, _, _ in ordered_work(reader, plan):
         if values is not None:
             stats = combine_stats(stats, values)
@@ -78,14 +79,18 @@ def write_export(reader, path, *, max_error_uv, progress, **options):
         if progress and time.perf_counter()-last_notice >= 1:
             progress({"stage": "range_scan", "samples": completed, "total": plan.record_count*plan.record_samples})
             last_notice = time.perf_counter()
+    if progress:
+        progress({"stage": "range_scan", "samples": completed, "total": plan.logical_samples})
     if stats is None:
         raise DataIntegrityError("No source values were decoded")
     calibrations = tuple(calibrate(reader.channels[c], v, max_error_uv) for c, v in zip(plan.channels, stats))
     scan_seconds = time.perf_counter()-scan_start
     check_source()
-    header, fmt = _header(plan, calibrations)
+    header = _header(plan, calibrations)
     temporary = parent/(destination.name+".partial-"+uuid.uuid4().hex)
     measured, write_start = 0.0, time.perf_counter()
+    if progress:
+        progress({"stage": "write", "records": 0, "total": plan.record_count})
     origin = plan._origin
     try:
         import numpy as np
@@ -120,9 +125,14 @@ def write_export(reader, path, *, max_error_uv, progress, **options):
                 raise DataIntegrityError("EDF file length differs from its finalized plan")
             output.flush()
             os.fsync(output.fileno())
+        write_seconds = time.perf_counter()-write_start
+        if progress:
+            progress({"stage": "write", "records": plan.record_count, "total": plan.record_count})
         check_source()
         from ._edf_verify import verify_export
-        verify_export(reader, temporary, plan, calibrations, max_error_uv)
+        verify_start = time.perf_counter()
+        verify_export(reader, temporary, plan, calibrations, max_error_uv, progress)
+        verify_seconds = time.perf_counter()-verify_start
         check_source()
         if progress:
             progress({"stage": "publishing", "file_bytes": plan.output_bytes})
@@ -140,10 +150,10 @@ def write_export(reader, path, *, max_error_uv, progress, **options):
         measured_max_error_uv=measured, event_count=plan.event_count,
         channel_count=len(plan.channels), shorted_channels=plan.shorted_channels,
         channel_labels=plan.channel_labels,
-        uncalibrated_channels=sum(c >= 256 for c in plan.channels),
+        channel_units=plan.channel_units,
         backend=plan.backend, workers=plan.workers, chunk_samples=plan.chunk_samples,
         elapsed_seconds=time.perf_counter()-began, scan_seconds=scan_seconds,
-        write_seconds=time.perf_counter()-write_start,
+        write_seconds=write_seconds, verify_seconds=verify_seconds,
     )
 
 

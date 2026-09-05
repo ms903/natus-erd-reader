@@ -1,0 +1,64 @@
+[
+  {
+    "name": "two_segments",
+    "sample_rate": "512",
+    "origin": "1/8",
+    "record_samples": 16,
+    "segments": [
+      [
+        0,
+        32
+      ],
+      [
+        544,
+        576
+      ]
+    ],
+    "record_starts": [
+      0,
+      16,
+      544,
+      560
+    ],
+    "tal_onsets": [
+      "+0.125",
+      "+0.15625",
+      "+1.1875",
+      "+1.21875"
+    ],
+    "stored_seconds": "1/8",
+    "elapsed_seconds": "9/8",
+    "events": [
+      {
+        "sample": 16,
+        "text": "synthetic boundary",
+        "record": 1
+      },
+      {
+        "sample": 256,
+        "text": "synthetic gap",
+        "record": 2
+      },
+      {
+        "sample": 544,
+        "text": "synthetic resume",
+        "record": 2
+      }
+    ]
+  },
+  {
+    "name": "fractional_tail_refusal",
+    "sample_rate": "251/2",
+    "segments": [
+      [
+        0,
+        252
+      ],
+      [
+        502,
+        753
+      ]
+    ],
+    "expected": "No common exact finite-decimal record grid; reject without padding or trimming."
+  }
+]

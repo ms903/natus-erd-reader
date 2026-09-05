@@ -60,6 +60,16 @@ class NativePacketTests(unittest.TestCase):
         self.native.process(encoded,mask,(0,),2,0,2,1,(),decoded,2,0)
         np.testing.assert_equal(decoded,[[-2**31,2**31-1]])
         stats = self.native.process(encoded,mask,(0,),2,0,2,0,(),None,2,0)
-        self.assertEqual(stats,((-2**31,2**31-1,2**32-1),))
+        self.assertEqual(stats,((-2**31,2**31-1),))
 
 
+
+    def test_negative_gain_and_shorted_export_codes(self):
+        payload=_encode_packet([[v]*276 for v in (-7,-5,-3,-1,1,3,5,7)])
+        mask=bytes(i in SHORTED for i in range(276))
+        parameters=((0,1.,8.,-8.,-4,4,0,1),(1,0.,8711.,-8711.,-32768,32767,0,1))
+        output=bytearray(32)
+        self.native.process(payload,mask,(0,249),8,0,8,2,parameters,output,8,0)
+        values=np.frombuffer(output,dtype='<i2').reshape(2,8)
+        np.testing.assert_equal(values[0],[4,2,2,0,0,-2,-2,-4])
+        np.testing.assert_equal(values[1],32767)

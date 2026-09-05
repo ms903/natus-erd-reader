@@ -10,12 +10,12 @@ from math import isfinite
 from pathlib import Path
 from typing import Literal, TypeAlias
 
-from .clock import ClockEstimate
+from .clock import BEIJING, ClockEstimate
 from .errors import ResourceLimitError, UnsupportedFormatError
 from .limits import check_limit
 from .reader import ChannelSelector, NatusERDReader
 from ._parameters import integer as _integer
-from ._edf_codec import escape_event, header_labels
+from ._edf_codec import escape_event, header_labels, channel_unit
 from ._export_worker import execution
 
 Progress: TypeAlias = Callable[[dict[str, int | float | str]], None]
@@ -80,6 +80,7 @@ class EdfExportPlan:
 
     Channel indices refer to the source recording. ``channel_labels`` contains
     (source index, source name, EDF label) tuples in exported row order.
+    ``channel_units`` uses that same order; shorted selections are retained.
     """
 
     start: int
@@ -87,6 +88,7 @@ class EdfExportPlan:
     channels: tuple[int, ...]
     shorted_channels: tuple[int, ...]
     channel_labels: tuple[tuple[int, str, str], ...]
+    channel_units: tuple[str, ...]
     sample_rate: Fraction
     record_samples: int
     record_duration_text: str
@@ -127,13 +129,14 @@ class EdfExportResult:
     channel_count: int
     shorted_channels: tuple[int, ...]
     channel_labels: tuple[tuple[int, str, str], ...]
-    uncalibrated_channels: int
+    channel_units: tuple[str, ...]
     backend: str
     workers: int
     chunk_samples: int
     elapsed_seconds: float
     scan_seconds: float
     write_seconds: float
+    verify_seconds: float
 
 
 def _clock_metadata(
@@ -181,13 +184,13 @@ def _layout(
     if size < required or size > limit:
         raise ResourceLimitError("EDF annotation capacity cannot contain complete event TALs")
     total = 256*(len(selected)+2)+count*(2*len(selected)*points+size)
-    return EdfExportPlan(first, last, selected, shorted, labels, rate, points, duration,
+    return EdfExportPlan(first, last, selected, shorted, labels, tuple(channel_unit(c) for c in selected), rate, points, duration,
                          count, size, total, len(source_events), _header_ticks=clock[0],
                          _utc_offset_seconds=clock[1], _origin=origin, _events=event_records)
 
 
 def plan_edf(
-    reader: NatusERDReader, *, timezone: str | tzinfo = "UTC", start: int = 0,
+    reader: NatusERDReader, *, timezone: str | tzinfo = BEIJING, start: int = 0,
     stop: int | None = None, channels: ChannelSelector = None, events: EventPolicy = "full",
     extrapolation: Literal["error", "nominal"] = "error", max_extrapolation_seconds: float = 10.0,
     annotation_bytes: int | Literal["auto"] = "auto", max_output_bytes: int | None = None,
@@ -197,9 +200,9 @@ def plan_edf(
 ) -> EdfExportPlan:
     """Plan a fully stored [start, stop) window using source sample indices.
 
-    Defaults select every recorded channel, dropping shorted channels. Events
+    Defaults select every recorded channel, including shorted channels. Events
     cover the whole source recording; ``types`` replaces text with note types.
-    UTC is the default EDF wall clock. Named timezones require timezone data.
+    Beijing (fixed UTC+08:00) is the default wall clock and needs no timezone data.
     No waveforms are decoded here: export's range scan checks quantization.
     Gaps or an inexact record grid raise UnsupportedFormatError; insufficient
     buffer, annotation or explicit output budgets raise ResourceLimitError.
@@ -230,9 +233,6 @@ def plan_edf(
     if not selected or len(set(selected)) != len(selected):
         raise ValueError("Export channels must be nonempty and unique")
     shorted = tuple(c for c in selected if reader.channels[c].shorted)
-    selected = tuple(c for c in selected if not reader.channels[c].shorted)
-    if not selected:
-        raise UnsupportedFormatError("Export has no non-shorted channels")
     check_limit(256*(len(selected)+2), reader.limits.max_metadata_bytes, "EDF header bytes")
     check_limit(len(selected)+1, reader.limits.max_parse_nodes, "EDF signal count")
     spans = []
@@ -303,28 +303,32 @@ def plan_edf(
 
 
 def export_edf(
-    reader: NatusERDReader, path: str | Path, *, timezone: str | tzinfo = "UTC",
+    reader: NatusERDReader, path: str | Path, *, timezone: str | tzinfo = BEIJING,
     start: int = 0, stop: int | None = None, channels: ChannelSelector = None,
     events: EventPolicy = "full", extrapolation: Literal["error", "nominal"] = "error", max_extrapolation_seconds: float = 10.0,
     annotation_bytes: int | Literal["auto"] = "auto", max_output_bytes: int | None = None,
     max_error_uv: float = 0.5, backend: Backend = "auto", workers: int | Literal["auto"] = "auto",
     memory_budget_bytes: int = 256*1024**2, chunk_samples: int | None = None,
-    progress: Progress | None = None,
+    progress: bool | Progress = True,
 ) -> EdfExportResult:
     """Write EDF+C with a range scan, bounded encoding and checked publication.
 
     EEG is calibrated in uV with a maximum quantization error of 0.5 uV by
-    default. Auxiliary channels preserve integer values with an empty unit.
+    default. Auxiliary calibration follows the documented Quantum EDF units.
+    Shorted channels contain digital 32767. Progress bars appear by default;
+    use progress=False to disable them or pass a callback for stage updates.
     Unrepresentable ranges fail before writing. Existing paths are never
     overwritten. Source changes, invalid codes and failed readback comparisons
     raise DataIntegrityError. See plan_edf for window and execution options.
     """
     from ._edf_write import write_export
-    return write_export(reader, path, timezone=timezone, start=start, stop=stop,
-        channels=channels, events=events, extrapolation=extrapolation,
-        max_extrapolation_seconds=max_extrapolation_seconds, annotation_bytes=annotation_bytes,
-        max_output_bytes=max_output_bytes, max_error_uv=max_error_uv,
-        backend=backend, workers=workers, memory_budget_bytes=memory_budget_bytes,
-        chunk_samples=chunk_samples, progress=progress)
+    from ._progress import reporting
+    with reporting(progress) as callback:
+        return write_export(reader, path, timezone=timezone, start=start, stop=stop,
+            channels=channels, events=events, extrapolation=extrapolation,
+            max_extrapolation_seconds=max_extrapolation_seconds, annotation_bytes=annotation_bytes,
+            max_output_bytes=max_output_bytes, max_error_uv=max_error_uv,
+            backend=backend, workers=workers, memory_budget_bytes=memory_budget_bytes,
+            chunk_samples=chunk_samples, progress=callback)
 
 

@@ -2,7 +2,6 @@
 from __future__ import annotations
 import math
 from dataclasses import dataclass
-from fractions import Fraction
 from .errors import UnsupportedFormatError
 
 def escape_event(text):
@@ -32,17 +31,6 @@ def header_labels(names):
     return tuple(result)
 
 
-def exact_integer_field(value):
-    candidates = [str(value)]
-    for exponent in range(1, 20):
-        if value % (10 ** exponent) == 0:
-            candidates.append(f"{value // 10 ** exponent}E{exponent}")
-    result = min(candidates, key=lambda v: (len(v), "E" in v, v))
-    if len(result) > 8 or Fraction(result) != value:
-        raise UnsupportedFormatError("Auxiliary integer endpoint exceeds the EDF 8-character field")
-    return result
-
-
 def outward_field(value, lower):
     number = math.floor(value) if lower else math.ceil(value)
     if len(str(number)) <= 8:
@@ -66,6 +54,7 @@ class Calibration:
     raw_min: int = 0
     raw_step: int = 1
     raw: bool = False
+    unit: str = "uV"
 
     @property
     def native(self):
@@ -74,22 +63,41 @@ class Calibration:
 
     @property
     def error_bound(self):
-        return 0.0 if self.raw else (float(self.pmax) - float(self.pmin)) / (self.dmax-self.dmin) / 2
+        return 0.0 if self.raw else abs(float(self.pmax) - float(self.pmin)) / (self.dmax-self.dmin) / 2
+
+
+def channel_unit(index: int) -> str:
+    return "%" if index == 273 else "bpm" if index == 274 else "uV"
+
+
+def official_calibration(index: int) -> Calibration:
+    """Quantum calibration from six complete official reference exports."""
+    if index < 256:
+        return Calibration("8711", "-8711", -32768, 32767, 0.0, raw=True)
+    if index <= 272:
+        return Calibration("5151600", "-5151600", -32768, 32767,
+                           1.0, -32768, 1, True)
+    if index in (273, 274):
+        return Calibration("0", "102.3" if index == 273 else "1023", 0, 32767,
+                           1.0, 131070, 1, True, channel_unit(index))
+    return Calibration("4.29e+09", "32767", -32768, 32767,
+                       1.0, -32768, 1, True)
 
 
 def calibrate(channel, stats, max_error_uv):
-    low, high, step = stats
+    low, high = stats
     if channel.shorted:
-        return Calibration("-1", "1", -32768, 32767, 0.0)
+        return official_calibration(channel.index)
     if not channel.is_signal:
-        if low == high:
-            # Valid nondegenerate endpoints; digital zero reconstructs low.
-            return Calibration(exact_integer_field(low-1), exact_integer_field(low+1),
-                               -1, 1, 1.0, low-1, 1, True)
-        if step < 1 or (high-low) % step or (high-low)//step > 65535:
-            raise UnsupportedFormatError(f"Auxiliary channel index {channel.index} cannot be represented losslessly in EDF")
-        return Calibration(exact_integer_field(low), exact_integer_field(high),
-                           -32768, -32768+(high-low)//step, 1.0, low, step, True)
+        cal = official_calibration(channel.index)
+        if channel.index in (273, 274) and (low, high) != (131070, 131070):
+            name = "OSAT" if channel.index == 273 else "PR"
+            raise UnsupportedFormatError(f"{name} channel index {channel.index}: only missing code 131070 is verified; select other channels")
+        if channel.index == 275 and (low, high) != (0, 0):
+            raise UnsupportedFormatError("Pleth channel index 275: only source code 0 is verified; select other channels")
+        if low < cal.raw_min or high > cal.raw_min+(cal.dmax-cal.dmin)*cal.raw_step:
+            raise UnsupportedFormatError(f"Auxiliary channel index {channel.index} exceeds the official digital range")
+        return cal
     a, b = sorted((low*channel.scale_uv_per_count, high*channel.scale_uv_per_count))
     if a == b:
         a, b = a-1, b+1

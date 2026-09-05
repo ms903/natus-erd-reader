@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "natus-erd-reader"
-version = "0.3.0rc1"
+version = "0.3.0rc2"
 description = "Resource-bounded Natus ERD reader and continuous EDF+C export"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT AND BSD-3-Clause"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [{name = "ms903 and natus-erd-reader contributors"}]
-dependencies = ["numpy>=1.24"]
+dependencies = ["numpy>=1.24", "tqdm>=4.66"]
 keywords = ["eeg", "seeg", "natus", "neuroworks", "erd"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -35,7 +35,7 @@ Issues = "https://github.com/ms903/natus-erd-reader/issues"
 Changelog = "https://github.com/ms903/natus-erd-reader/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-dev = ["build>=1.2", "twine>=5", "mypy>=1.8"]
+dev = ["build>=1.2", "twine>=5", "mypy>=1.8", "types-tqdm>=4.66"]
 interop = ["mne>=1.6", "pyedflib>=0.1.40"]
 timezones = ["tzdata>=2024.1"]
 
@@ -55,6 +55,6 @@ warn_unused_ignores = true
 build = "cp310-* cp311-* cp312-* cp313-* cp314-*"
 skip = "*-win32 *-win_arm64 *-musllinux_*"
 archs = ["auto64"]
-test-requires = ["numpy"]
+test-requires = ["numpy", "tqdm"]
 test-command = "python -c \"from natus_erd import _native; assert callable(_native.process)\" && python -m unittest discover -s {project}/tests -t {project}"
 environment = { NATUS_ERD_REQUIRE_NATIVE = "1", OPENBLAS_NUM_THREADS = "1", OMP_NUM_THREADS = "1" }

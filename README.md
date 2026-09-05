@@ -4,19 +4,20 @@
 
 Read Natus NeuroWorks ERD signals, ENT events and SNC clocks in Python, and
 export continuous windows as standard EDF+C for other analysis tools.
-The source version is **0.3.0rc1**, a development candidate.
+The source version is **0.3.0rc2**, a development candidate.
 
 ## Install
 
-Python 3.10+ and NumPy 1.24+ are required. Install this checkout with:
+Use Python 3.10+. NumPy and tqdm are installed automatically:
 
 ```sh
-python -m pip install .
+python -m pip install "natus-erd-reader==0.3.0rc2"
 ```
 
 The optional C extension accelerates EDF export. A single-worker Python
 implementation is available on other platforms. For named timezones on systems
-without an IANA database, install `.[timezones]`.
+without an IANA database, install `natus-erd-reader[timezones]==0.3.0rc2`.
+The default Beijing offset does not require this extra.
 
 ## Read a window
 
@@ -36,18 +37,23 @@ are NaN. Use `iter_samples()` for longer intervals.
 ## Export EDF+C
 
 ```python
-from natus_erd import plan_edf, export_edf
+from natus_erd import NatusERDReader, export_edf
 
-print(tuple(reader.iter_stored_ranges()))
-start, stop = 0, 2048  # Choose an exact, fully stored interval from this recording.
-plan = plan_edf(reader, start=start, stop=stop)
-result = export_edf(reader, "window.edf", start=start, stop=stop)
+reader = NatusERDReader.open(r"D:\data\recording")
+result = export_edf(reader, r"D:\output.edf")
 ```
 
-Export defaults to all recorded channels, drops shorted channels, preserves
-auxiliary integer values and limits EEG quantization error to 0.5 uV. It retains
-parsed events from the entire recording. See the [EDF export guide](https://natus-reader.github.io/en/edf-export/)
-for exact record alignment, clocks, annotations and third-party reading.
+Defaults export all 276 channels with fixed Beijing UTC+08:00 and separate
+scan, write and verification progress bars. Set `progress=False` to hide them.
+Shorted channels retain their names and digital 32767. EEG quantization error
+is bounded by 0.5 uV; auxiliaries use the documented official calibration and
+units. The whole recording must be continuous and exactly representable;
+select `start`, `stop` or `channels` when needed.
+
+Parsed events from the entire recording are retained. Results include output
+labels, units and separate `scan_seconds`, `write_seconds`, `verify_seconds`
+and total `elapsed_seconds`. See the [EDF export guide](https://natus-reader.github.io/en/edf-export/)
+for auxiliary value support, window selection, clocks and third-party reading.
 
 ## Supported recordings
 

@@ -5,6 +5,8 @@ from fractions import Fraction
 from datetime import timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 
 from .errors import DataIntegrityError
 from ._edf_codec import Calibration
@@ -16,7 +18,7 @@ if TYPE_CHECKING:
 
 def verify_export(
     reader: NatusERDReader, path: Path, plan: EdfExportPlan,
-    calibrations: tuple[Calibration, ...], max_error_uv: float,
+    calibrations: tuple[Calibration, ...], max_error_uv: float, progress=None,
 ) -> None:
     """Validate all digital codes/TALs and compare bounded windows to ERD."""
     import numpy as np
@@ -56,47 +58,94 @@ def verify_export(
                 if (Fraction(fields[3][row]) != Fraction(cal.pmin)
                         or Fraction(fields[4][row]) != Fraction(cal.pmax)
                         or int(fields[5][row]) != cal.dmin or int(fields[6][row]) != cal.dmax
-                        or cal.dmin >= cal.dmax or Fraction(cal.pmin) >= Fraction(cal.pmax)
-                        or fields[2][row] != ("" if cal.raw else "uV")):
+                        or cal.dmin >= cal.dmax or Fraction(cal.pmin) == Fraction(cal.pmax)
+                        or fields[2][row] != cal.unit):
                     raise ValueError("Invalid EDF calibration")
         except (ValueError, UnicodeError, ZeroDivisionError) as exc:
             raise DataIntegrityError("EDF readback header is invalid") from exc
 
-        # Record size is limited to 61,440 bytes by preflight. All codes are
-        # checked, including channels using a narrower digital calibration.
-        for index in range(plan.record_count):
-            payload = stream.read(record_bytes)
-            if len(payload) != record_bytes:
-                raise DataIntegrityError("Truncated EDF record")
-            codes = np.frombuffer(payload[:wave_bytes], dtype="<i2").reshape(rows, plan.record_samples)
-            for row, cal in enumerate(calibrations):
-                if np.any(codes[row] < cal.dmin) or np.any(codes[row] > cal.dmax):
-                    raise DataIntegrityError("EDF sample code is outside its declared digital range")
-            expected = _tal(plan._origin+Fraction(index*plan.record_samples)/plan.sample_rate)+plan._events.get(index, b"")
-            if payload[wave_bytes:] != expected.ljust(plan.annotation_bytes, b"\0"):
+        minimum = np.asarray([c.dmin for c in calibrations])[None, :, None]
+        maximum = np.asarray([c.dmax for c in calibrations])[None, :, None]
+        shorted_rows = [i for i, c in enumerate(plan.channels) if c in plan.shorted_channels]
+        block_records = max(1, plan.chunk_samples//plan.record_samples)
+
+        def check_block(first, payload):
+            count = len(payload)//record_bytes
+            codes = np.ndarray((count, rows, plan.record_samples), dtype="<i2",
+                               buffer=payload, strides=(record_bytes, plan.record_samples*2, 2))
+            if np.any(codes < minimum) or np.any(codes > maximum):
+                raise DataIntegrityError("EDF sample code is outside its declared digital range")
+            if shorted_rows and np.any(codes[:, shorted_rows] != 32767):
+                raise DataIntegrityError("EDF shorted channel differs from digital 32767")
+            annotations = np.ndarray((count, plan.annotation_bytes), dtype="u1", buffer=payload,
+                                     offset=wave_bytes, strides=(record_bytes, 1))
+            expected = bytearray(count*plan.annotation_bytes)
+            for offset in range(count):
+                index = first+offset
+                tal = _tal(plan._origin+Fraction(index*plan.record_samples)/plan.sample_rate)+plan._events.get(index, b"")
+                begin = offset*plan.annotation_bytes
+                expected[begin:begin+len(tal)] = tal
+            if not np.array_equal(annotations, np.frombuffer(expected, dtype="u1").reshape(count, plan.annotation_bytes)):
                 raise DataIntegrityError("EDF annotation or record onset differs from plan")
+            return count
+
+        if progress:
+            progress({"stage": "verify", "records": 0, "total": plan.record_count})
+        # Only the coordinator reads the disk. At most workers blocks are queued.
+        with ThreadPoolExecutor(max_workers=plan.workers, thread_name_prefix="natus-verify") as pool:
+            pending: deque[Future[int]] = deque()
+            completed = 0
+            for first in range(0, plan.record_count, block_records):
+                if len(pending) == plan.workers:
+                    completed += pending.popleft().result()
+                    if progress:
+                        progress({"stage": "verify", "records": completed, "total": plan.record_count})
+                count = min(block_records, plan.record_count-first)
+                payload = stream.read(count*record_bytes)
+                if len(payload) != count*record_bytes:
+                    raise DataIntegrityError("Truncated EDF record")
+                pending.append(pool.submit(check_block, first, payload))
+                del payload
+            while pending:
+                completed += pending.popleft().result()
+                if progress and completed < plan.record_count:
+                    progress({"stage": "verify", "records": completed, "total": plan.record_count})
 
         starts = sorted({0, plan.logical_samples//4, plan.logical_samples//2,
                          plan.logical_samples*3//4, max(0, plan.logical_samples-16)})
         width_limit = min(16, reader.limits.max_read_samples, reader.limits.max_read_bytes//8)
         if width_limit < 1:
-            # The independent comparison needs one scalar source sample.
             from .errors import ResourceLimitError
             raise ResourceLimitError("EDF readback requires space for one source sample")
+        # Each window uses one contiguous EDF read and batched source channels.
+        # Small user read limits still apply to these independent source reads.
         for start in starts:
             stop = min(start+width_limit, plan.logical_samples)
-            for row, (channel, cal) in enumerate(zip(plan.channels, calibrations)):
-                source = reader.read_samples(plan.start+start, plan.start+stop, [channel], units="digital")[0]
-                physical: list[float] = []
-                for sample in range(start, stop):
-                    record, column = divmod(sample, plan.record_samples)
-                    stream.seek(header_bytes+record*record_bytes+2*(row*plan.record_samples+column))
-                    code = int.from_bytes(stream.read(2), "little", signed=True)
+            first_record = start//plan.record_samples
+            last_record = (stop+plan.record_samples-1)//plan.record_samples
+            stream.seek(header_bytes+first_record*record_bytes)
+            payload = stream.read((last_record-first_record)*record_bytes)
+            codes = np.ndarray((last_record-first_record, rows, plan.record_samples), dtype="<i2",
+                               buffer=payload, strides=(record_bytes, plan.record_samples*2, 2))
+            values = codes.transpose(1, 0, 2).reshape(rows, -1)[:, start-first_record*plan.record_samples:stop-first_record*plan.record_samples]
+            batch_rows = max(1, min(rows, reader.limits.max_selected_channels,
+                                   reader.limits.max_read_bytes//(8*(stop-start))))
+            for first in range(0, rows, batch_rows):
+                selected = plan.channels[first:first+batch_rows]
+                source = reader.read_samples(plan.start+start, plan.start+stop, selected, units="digital")
+                for row, channel in enumerate(selected, first):
+                    cal = calibrations[row]
+                    if channel in plan.shorted_channels:
+                        continue
                     if cal.raw:
-                        physical.append(cal.raw_min+(code-cal.dmin)*cal.raw_step)
+                        reconstructed = cal.raw_min+(values[row].astype(np.int64)-cal.dmin)*cal.raw_step
+                        expected_values = source[row-first]
+                        tolerance = 0.0
                     else:
-                        physical.append((code-cal.dmin)*(float(cal.pmax)-float(cal.pmin))/(cal.dmax-cal.dmin)+float(cal.pmin))
-                expected_values = source if cal.raw else source*cal.source_scale
-                tolerance = 0.0 if cal.raw else max_error_uv+1e-9
-                if not np.all(np.abs(np.asarray(physical)-expected_values) <= tolerance):
-                    raise DataIntegrityError("EDF readback differs from source waveform")
+                        reconstructed = (values[row].astype(float)-cal.dmin)*(float(cal.pmax)-float(cal.pmin))/(cal.dmax-cal.dmin)+float(cal.pmin)
+                        expected_values = source[row-first]*cal.source_scale
+                        tolerance = max_error_uv+1e-9
+                    if not np.all(np.abs(reconstructed-expected_values) <= tolerance):
+                        raise DataIntegrityError("EDF readback differs from source waveform")
+        if progress:
+            progress({"stage": "verify", "records": plan.record_count, "total": plan.record_count})

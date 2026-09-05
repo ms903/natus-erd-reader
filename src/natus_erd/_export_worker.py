@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter, deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from math import gcd, lcm
+from math import lcm
 import os
 from typing import Any
 
@@ -84,6 +84,11 @@ def execution(reader, channels, points, annotation_bytes, output_bytes, backend,
         # Boundary carry may need a joined block, a contiguous view and record
         # interleaving at once; each is explicitly charged, including TALs.
         required = reserve+(count+3)*payload+encoded_payload+2*record_bytes+count*(reader.limits.max_packet_bytes+scratch)
+        # Verification retains one input block per worker, one boolean code
+        # comparison and an expected TAL block per job. Independent waveform
+        # windows hold at most 16 samples per row plus two complete records.
+        verify_required = reserve+count*(2*encoded_payload+payload//2)+rows*16*32+4*record_bytes+reader.limits.max_packet_bytes
+        required = max(required, verify_required)
         if required <= budget:
             return Execution(backend, count, target, budget, required)
         if automatic and count > 1:
@@ -151,8 +156,7 @@ def jobs(reader, plan):
 def combine_stats(left, right):
     if left is None:
         return right
-    return tuple((min(a, d), max(b, e), gcd(gcd(c, f), abs(a-d)))
-                 for (a, b, c), (d, e, f) in zip(left, right))
+    return tuple((min(a, c), max(b, d)) for (a, b), (c, d) in zip(left, right))
 
 
 def work(job, *, reader, selected, backend, calibrations=None):
@@ -206,18 +210,18 @@ def work(job, *, reader, selected, backend, calibrations=None):
                     result = []
                     for row, channel in enumerate(selected):
                         if shorted[channel]:
-                            result.append((0, 0, 0))
+                            result.append((0, 0))
                             continue
                         integers = values[row].astype(np.int64)
                         low, high = int(integers.min()), int(integers.max())
-                        step = int(np.gcd.reduce(integers-low))
-                        result.append((low, high, step))
+                        result.append((low, high))
                     stats = combine_stats(stats, tuple(result))
                 else:
                     assert output is not None
                     destination = np.frombuffer(output, dtype="<i2").reshape(rows, job.width)
                     for row, channel in enumerate(selected):
                         if shorted[channel]:
+                            destination[row, packet.column:packet.column+packet.stop-packet.start] = 32767
                             continue
                         cal = calibrations[row]
                         v = values[row]
@@ -229,7 +233,7 @@ def work(job, *, reader, selected, backend, calibrations=None):
                         else:
                             v *= cal.source_scale
                             pmin, pmax = float(cal.pmin), float(cal.pmax)
-                            if not np.isfinite(v).all() or np.any(v < pmin) or np.any(v > pmax):
+                            if not np.isfinite(v).all() or np.any(v < min(pmin, pmax)) or np.any(v > max(pmin, pmax)):
                                 raise DataIntegrityError("Signal exceeded its pre-scanned physical range")
                             codes = np.rint((v-pmin)*((cal.dmax-cal.dmin)/(pmax-pmin))+cal.dmin)
                             error = np.max(np.abs((codes-cal.dmin)*((pmax-pmin)/(cal.dmax-cal.dmin))+pmin-v))

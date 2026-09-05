@@ -17,7 +17,7 @@ import numpy as np
 
 from natus_erd import (NatusERDReader, ReadLimits, Event, export_edf, plan_edf,
                        DataIntegrityError, ResourceLimitError, UnsupportedFormatError)
-from natus_erd._edf_codec import calibrate, exact_integer_field, header_labels
+from natus_erd._edf_codec import calibrate, header_labels, official_calibration
 from natus_erd._export_worker import native_available, execution
 from natus_erd._edf_verify import verify_export
 from ._fixture import (build_recording, build_continuous_recording, _snc,
@@ -34,7 +34,7 @@ class EdfExportTests(unittest.TestCase):
 
     def export(self, **kwargs):
         target = self.root/(uuid.uuid4().hex+'.edf')
-        options = dict(channels=[1, 2, 249, 256, 273])
+        options = dict(channels=[1, 2, 249, 256, 273], progress=False)
         options.update(kwargs)
         return target, export_edf(self.reader, target, **options)
 
@@ -42,15 +42,85 @@ class EdfExportTests(unittest.TestCase):
         limits = ReadLimits(max_read_samples=1, max_read_bytes=8)
         reader = NatusERDReader.open(self.fixture.directory, limits=limits)
         plan = plan_edf(reader)
-        self.assertEqual(plan.channels, tuple(c for c in range(276) if c not in {249, 251, 253, 255}))
+        self.assertEqual(plan.channels, tuple(range(276)))
         self.assertEqual(plan.shorted_channels, (249, 251, 253, 255))
         self.assertGreater(plan.chunk_samples, limits.max_read_samples)
         self.assertIs(reader.limits, limits)
         result = export_edf(reader, self.root/'all.edf')
-        self.assertEqual(result.channel_count, 272)
+        self.assertEqual(result.channel_count, 276)
         self.assertEqual(result.shorted_channels, plan.shorted_channels)
         with self.assertRaises(ResourceLimitError):
             reader.read_samples(0, 2, [0])
+
+    def test_progress_defaults_disable_callback_and_phase_timings(self):
+        from contextlib import redirect_stderr
+        from io import StringIO
+        for setting in (True, False):
+            output = StringIO()
+            with redirect_stderr(output):
+                _, result = self.export(progress=setting)
+            for stage in ('Scanning', 'Writing', 'Verifying'):
+                self.assertEqual(stage in output.getvalue(), setting)
+            self.assertGreaterEqual(result.elapsed_seconds, result.scan_seconds+result.write_seconds+result.verify_seconds)
+            self.assertGreater(result.verify_seconds, 0)
+        updates=[]
+        self.export(progress=updates.append)
+        for stage in ('range_scan','write','verify'):
+            events=[e for e in updates if e['stage']==stage]
+            key='samples' if stage=='range_scan' else 'records'
+            self.assertEqual(events[0][key],0)
+            self.assertEqual(events[-1][key],events[-1]['total'])
+            self.assertEqual([e[key] for e in events], sorted(e[key] for e in events))
+        with self.assertRaises(TypeError):
+            self.export(progress='yes')
+        path, _ = self.export()
+        self.assertEqual(path.read_bytes()[176:184],b'20.00.00')
+        plan=plan_edf(self.reader)
+        self.assertEqual(plan._utc_offset_seconds,28800)
+        self.assertEqual(plan.channel_units,('uV',)*273+('%','bpm','uV'))
+
+    def test_batched_readback_and_late_tal_and_truncation_corruption(self):
+        from natus_erd._edf_write import ordered_work
+        from natus_erd._export_worker import combine_stats
+        plan=plan_edf(self.reader,channels=[1,2,249,256,273],chunk_samples=256,annotation_bytes=60000)
+        path,_=self.export(chunk_samples=256,annotation_bytes=60000)
+        stats=None
+        for _,_,part,_,_ in ordered_work(self.reader,plan):
+            stats=combine_stats(stats,part)
+        calibrations=tuple(calibrate(self.reader.channels[c],v,.5) for c,v in zip(plan.channels,stats))
+        with patch.object(self.reader,'read_samples',wraps=self.reader.read_samples) as reads:
+            verify_export(self.reader,path,plan,calibrations,.5)
+        self.assertEqual(reads.call_count,5)
+        original=path.read_bytes()
+        changed=bytearray(original)
+        changed[-1]=1
+        path.write_bytes(changed)
+        with self.assertRaisesRegex(DataIntegrityError,'annotation'):
+            verify_export(self.reader,path,plan,calibrations,.5)
+        changed=bytearray(original)
+        record_bytes=len(plan.channels)*plan.record_samples*2+plan.annotation_bytes
+        late_code=256*(len(plan.channels)+2)+(plan.record_count-1)*record_bytes+4*plan.record_samples*2
+        pack_into('<h',changed,late_code,-1)
+        path.write_bytes(changed)
+        with self.assertRaisesRegex(DataIntegrityError,'digital range'):
+            verify_export(self.reader,path,plan,calibrations,.5)
+        path.write_bytes(original[:-2])
+        with self.assertRaisesRegex(DataIntegrityError,'length'):
+            verify_export(self.reader,path,plan,calibrations,.5)
+
+    def test_shorted_selection_uses_flags_and_preserves_positions(self):
+        _, result=self.export(channels=[249,251])
+        self.assertEqual(result.channel_count,2)
+        self.assertEqual(result.shorted_channels,(249,251))
+        root=self.root/'different-shorted'
+        root.mkdir()
+        fixture=build_continuous_recording(root,shorted={1,256})
+        reader=NatusERDReader.open(fixture.directory)
+        plan=plan_edf(reader,channels=[256,2,1])
+        result=export_edf(reader,self.root/'different-shorted.edf',channels=[256,2,1],progress=False)
+        self.assertEqual(result.shorted_channels,(256,1))
+        self.assertEqual(plan.channels,(256,2,1))
+        self.assertEqual(plan.shorted_channels,(256,1))
 
     def test_clock_and_events_read_once_per_plan(self):
         with patch.object(self.reader, 'read_clock', wraps=self.reader.read_clock) as clock:
@@ -195,15 +265,15 @@ class EdfExportTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob('*.partial-*')))
 
     def test_bad_codes_and_changed_waveform_fail_readback(self):
-        for corrupt, message in ((32767, 'digital range'), (-32767, 'source waveform')):
-            def mutate(reader, path, plan, calibrations, limit):
+        for channel, corrupt, message in ((273,-1,'digital range'), (256,-32767,'source waveform'), (249,0,'shorted')):
+            def mutate(reader, path, plan, calibrations, limit, progress=None):
                 payload = bytearray(path.read_bytes())
                 pack_into('<h', payload, int(payload[184:192]), corrupt)
                 path.write_bytes(payload)
-                verify_export(reader, path, plan, calibrations, limit)
+                verify_export(reader, path, plan, calibrations, limit, progress)
             with patch('natus_erd._edf_verify.verify_export', side_effect=mutate):
                 with self.assertRaisesRegex(DataIntegrityError, message):
-                    self.export(channels=[256])
+                    self.export(channels=[channel])
         self.assertFalse(list(self.root.glob('*.edf')))
         self.assertFalse(list(self.root.glob('*.partial-*')))
 
@@ -214,7 +284,7 @@ class EdfExportTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob('*.edf*')))
         channel = self.reader.channels[1]
         with self.assertRaises(UnsupportedFormatError):
-            calibrate(channel, (-2**31, 2**31-1, 1), .5)
+            calibrate(channel, (-2**31, 2**31-1), .5)
 
     def test_mne_and_pyedflib_independent_readers(self):
         environment = patch.dict(os.environ, {'_MNE_FAKE_HOME_DIR': str(self.root),
@@ -228,58 +298,60 @@ class EdfExportTests(unittest.TestCase):
             self.skipTest('install the interop extra to run external-reader checks')
         self.reader._events = (Event(999, -1, 'before'), Event(1512, 512, 'inside'),
                                Event(3000, 2000, 'after'))
-        path, result = self.export()
-        selected = [1, 2, 256, 273]
+        selected = [1, 2, 249, 256, 272, 273, 274, 275]
+        path, result = self.export(channels=selected)
         expected = self.reader.read_samples(0, 1024, selected, units='digital')
         expected[:2] *= self.reader.channels[1].scale_uv_per_count
+        expected[2] = -8711
+        expected[3:5] = 5151600-(expected[3:5]+32768)*(10303200/65535)
+        expected[5:7] = 0
+        expected[7] = 4.29e9+32768*(32767-4.29e9)/65535
+        from datetime import timedelta
+        header_time = BASE_DATETIME+timedelta(hours=8)
+        labels = [self.reader.channels[c].name for c in selected]
+        units = ['uV','uV','uV','uV','uV','%','bpm','uV']
         with pyedflib.EdfReader(str(path)) as edf:
-            self.assertEqual(edf.signals_in_file, 4)
-            self.assertEqual(edf.getSignalLabels(), [self.reader.channels[c].name for c in selected])
-            np.testing.assert_equal(edf.getNSamples(), [1024]*4)
-            np.testing.assert_equal(edf.getSampleFrequencies(), [512]*4)
+            self.assertEqual(edf.signals_in_file, 8)
+            self.assertEqual(edf.getSignalLabels(), labels)
+            np.testing.assert_equal(edf.getNSamples(), [1024]*8)
+            np.testing.assert_equal(edf.getSampleFrequencies(), [512]*8)
             self.assertEqual(edf.getStartdatetime().replace(microsecond=0),
-                             BASE_DATETIME.replace(tzinfo=None, microsecond=0))
-            # EDFlib's raw value is in 100 ns ticks. pyEDFlib 0.1.42's
-            # datetime wrapper divides by 100 instead of 10 (fixed upstream).
+                             header_time.replace(tzinfo=None, microsecond=0))
             self.assertEqual(edf.starttime_subsecond, BASE_DATETIME.microsecond*10)
-            self.assertEqual([edf.getPhysicalDimension(i) for i in range(4)], ['uV', 'uV', '', ''])
-            for row in range(4):
-                np.testing.assert_allclose(edf.readSignal(row), expected[row], atol=.5 if row < 2 else 1e-9, rtol=0)
+            self.assertEqual([edf.getPhysicalDimension(i) for i in range(8)], units)
+            for row in range(8):
+                np.testing.assert_allclose(edf.readSignal(row), expected[row], atol=.5 if row < 2 else 1e-6, rtol=0)
             self.assertEqual(list(edf.readAnnotations()[2]), ['before', 'inside', 'after'])
-        raw = mne.io.read_raw_edf(str(path), preload=True, misc=['CH256', 'CH273'], verbose='ERROR')
-        self.assertEqual(raw.ch_names, ['CH001', 'CH002', 'CH256', 'CH273'])
-        self.assertEqual(raw.get_channel_types(), ['eeg', 'eeg', 'misc', 'misc'])
+            np.testing.assert_equal(edf.readSignal(2,digital=True),32767)
+            np.testing.assert_equal(edf.readSignal(5,digital=True),0)
+            np.testing.assert_equal(edf.readSignal(7,digital=True),0)
+        raw = mne.io.read_raw_edf(str(path), preload=False, misc=labels[3:], verbose='ERROR')
+        self.assertEqual(raw.ch_names, labels)
         self.assertEqual(raw.n_times, 1024)
         self.assertEqual(raw.info['sfreq'], 512)
-        # MNE retains header seconds in meas_date and normalizes annotation
-        # onsets to the first sample, omitting the initial fractional offset.
-        self.assertEqual(raw.info['meas_date'], BASE_DATETIME.replace(microsecond=0))
+        self.assertEqual(raw.info['meas_date'], header_time.replace(microsecond=0))
         values = raw.get_data()
-        values[:2] *= 1e6
-        np.testing.assert_allclose(values[:2], expected[:2], atol=.5, rtol=0)
-        np.testing.assert_allclose(values[2:], expected[2:], atol=1e-9, rtol=0)
+        for row, unit in enumerate(result.channel_units):
+            if unit == 'uV':
+                values[row] *= 1e6
+        np.testing.assert_allclose(values, expected, atol=.5, rtol=0)
         self.assertIn('inside', raw.annotations.description)
         inside = list(raw.annotations.description).index('inside')
         self.assertEqual(raw.annotations.onset[inside], 1.0)
         self.assertTrue(set(raw.annotations.description).issubset({'before', 'inside', 'after'}))
         self.assertEqual(result.event_count, 3)
 
-    def test_unknown_auxiliary_constant_is_not_nan(self):
-        channel = SimpleNamespace(index=273,is_signal=False,shorted=False)
-        cal = calibrate(channel,(131070,131070,0),.5)
-        self.assertEqual((cal.pmin,cal.pmax,cal.dmin,cal.dmax),('131069','131071',-1,1))
-        self.assertEqual((131070-cal.raw_min)//cal.raw_step+cal.dmin,0)
-
-    def test_lossless_auxiliary_gcd_mapping_and_refusal(self):
-        channel = SimpleNamespace(index=256,is_signal=False,shorted=False)
-        for stats in ((0,131070,2),(-327680,327670,10),(-1,1,1)):
-            cal = calibrate(channel,stats,.5)
-            self.assertEqual(cal.dmax-cal.dmin,(stats[1]-stats[0])//stats[2])
-            self.assertTrue(cal.raw)
-        for stats in ((0,65536,1),(123456789,123456790,1),(0,2,0)):
-            with self.subTest(stats=stats),self.assertRaises(UnsupportedFormatError):
-                calibrate(channel,stats,.5)
-        self.assertEqual(Fraction(exact_integer_field(1000000000)),1000000000)
+    def test_official_auxiliary_calibration_and_verified_missing_codes(self):
+        expected = [(256, (-32768,32767), 'uV', '5151600', '-5151600', -32768),
+                    (273, (131070,131070), '%', '0', '102.3', 131070),
+                    (274, (131070,131070), 'bpm', '0', '1023', 131070),
+                    (275, (0,0), 'uV', '4.29e+09', '32767', -32768)]
+        for index, stats, unit, pmin, pmax, raw_min in expected:
+            cal = calibrate(self.reader.channels[index],stats,.5)
+            self.assertEqual((cal.unit,cal.pmin,cal.pmax,cal.raw_min),(unit,pmin,pmax,raw_min))
+        for index, stats in ((256,(-32769,0)),(273,(98,131070)),(274,(60,60)),(275,(1,1))):
+            with self.assertRaisesRegex(UnsupportedFormatError, str(index)):
+                calibrate(self.reader.channels[index],stats,.5)
 
     def test_narrow_channels_include_annotation_bytes_in_memory_budget(self):
         config = execution(self.reader,(0,),4,8192,10**7,'python',1,128*1024**2,None)
@@ -320,7 +392,7 @@ class EdfExportTests(unittest.TestCase):
             self.skipTest('optional native extension unavailable')
         expected = None
         for backend,workers in (('python',1),('native',1),('native',2),('native',4)):
-            path,_ = self.export(backend=backend,workers=workers,chunk_samples=256,annotation_bytes=60000)
+            path,_ = self.export(channels=[1,2,249,256,272,273,274,275],backend=backend,workers=workers,chunk_samples=256,annotation_bytes=60000)
             data = path.read_bytes()
             if expected is None:
                 expected = data

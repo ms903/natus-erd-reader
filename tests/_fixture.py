@@ -232,17 +232,21 @@ def _annotation_layout(payload):
 
 
 def build_continuous_recording(root: Path, *, sample_rate: float = 512.0,
-                               samples: int = 1024, packet_samples: int = 63) -> SyntheticRecording:
+                               samples: int = 1024, packet_samples: int = 63,
+                               shorted: set[int] | frozenset[int] = frozenset(SHORTED)) -> SyntheticRecording:
     """Continuous, multi-packet signal with calibrated and exact auxiliary rows."""
-    fixture = build_recording(root, sample_rate=sample_rate)
+    fixture = build_recording(root, sample_rate=sample_rate, shorted=shorted)
     values = [[1500+channel+((sample*7)%257)*2 for channel in range(N_CHANNELS)]
               for sample in range(samples)]
-    erd = bytearray(_erd_header(sample_rate=sample_rate))
+    for row in values:
+        row[273] = row[274] = 131070
+        row[275] = 0
+    erd = bytearray(_erd_header(sample_rate=sample_rate, shorted=shorted))
     etc = bytearray(_generic_header(3))
     for start in range(0, samples, packet_samples):
         block = values[start:start+packet_samples]
         etc.extend(pack("<iiihh", len(erd), 1000+start, start, len(block), 0))
-        erd.extend(_encode_packet(block))
+        erd.extend(_encode_packet(block, shorted=shorted))
     fixture.first_erd.write_bytes(erd)
     fixture.first_erd.with_suffix('.etc').write_bytes(etc)
     fixture.stc.write_bytes(_generic_header(1)+pack("<ii12i", 1, 1, *([0]*12))

@@ -15,10 +15,6 @@ typedef struct {
     int64_t raw_min, raw_step;
 } Calibration;
 
-static uint64_t ugcd(uint64_t a, uint64_t b) {
-    while (b) { uint64_t t = a % b; a = b; b = t; }
-    return a;
-}
 static double even_round(double x) {
     double f = floor(x), remainder = x - f;
     if (remainder > 0.5 || (remainder == 0.5 && fmod(f, 2.0) != 0.0)) f += 1.0;
@@ -28,8 +24,8 @@ static int run(const uint8_t *p, size_t length, int count, int n,
                const uint8_t *shorted, int start, int stop, const int *selected,
                int rows, int operation, const Calibration *cal, uint8_t *out,
                size_t width, size_t column, int64_t *low, int64_t *high,
-               uint64_t *steps, double *errors) {
-    int64_t state[1024] = {0}, first[1024] = {0};
+               double *errors) {
+    int64_t state[1024] = {0};
     int absolutes[1024];
     size_t pos = 0, mask_size = (size_t)(n + 7) / 8;
     for (int sample = 0; sample < stop; ++sample) {
@@ -69,14 +65,18 @@ static int run(const uint8_t *p, size_t length, int count, int n,
         if (sample < start) continue;
         for (int row = 0; row < rows; ++row) {
             int c = selected[row];
-            if (shorted[c]) continue;
+            if (shorted[c]) {
+                if (operation == 2) {
+                    size_t at = ((size_t)row * width + column + (size_t)(sample-start)) * 2;
+                    out[at] = 255; out[at+1] = 127;
+                }
+                continue;
+            }
             int64_t value = state[c];
             if (operation == 0) {
-                if (sample == start) first[row] = low[row] = high[row] = value;
+                if (sample == start) low[row] = high[row] = value;
                 if (value < low[row]) low[row] = value;
                 if (value > high[row]) high[row] = value;
-                int64_t diff = value - first[row]; /* packet bounds imply < 2^34 */
-                steps[row] = ugcd(steps[row], (uint64_t)(diff < 0 ? -diff : diff));
             } else if (operation == 1) {
                 double v = (double)value;
                 size_t at = ((size_t)row * width + column + (size_t)(sample-start)) * 8;
@@ -90,7 +90,7 @@ static int run(const uint8_t *p, size_t length, int count, int n,
                     code = diff / k->raw_step + k->dmin;
                 } else {
                     double physical = (double)value * k->source_scale;
-                    if (!isfinite(physical) || physical < k->pmin || physical > k->pmax) return 5;
+                    if (!isfinite(physical) || physical < fmin(k->pmin, k->pmax) || physical > fmax(k->pmin, k->pmax)) return 5;
                     double q = (physical-k->pmin) * ((double)(k->dmax-k->dmin)/(k->pmax-k->pmin)) + k->dmin;
                     double rounded = even_round(q);
                     if (!isfinite(rounded) || rounded < k->dmin || rounded > k->dmax) return 5;
@@ -172,7 +172,7 @@ static PyObject *process(PyObject *self, PyObject *args) {
             double pmax = PyFloat_AsDouble(PyTuple_GET_ITEM(v,3));
             if (PyErr_Occurred()) return NULL;
             if ((raw != 0 && raw != 1) || !isfinite(scale) || !isfinite(pmin) || !isfinite(pmax) ||
-                pmin >= pmax || dmin < -32768 || dmax > 32767 || dmin >= dmax || step < 1 ||
+                pmin == pmax || dmin < -32768 || dmax > 32767 || dmin >= dmax || step < 1 ||
                 rmin < -INT64_C(9007199254740991) || rmin > INT64_C(9007199254740991) ||
                 step > INT64_C(9007199254740991)) {
                 PyErr_SetString(PyExc_ValueError, "Unsafe native calibration"); return NULL;
@@ -193,13 +193,12 @@ static PyObject *process(PyObject *self, PyObject *args) {
         }
     }
     int64_t low[1024] = {0}, high[1024] = {0};
-    uint64_t steps[1024] = {0};
     double errors[1024] = {0};
     const uint8_t *p = (const uint8_t *)PyBytes_AS_STRING(payload);
     int status;
     Py_BEGIN_ALLOW_THREADS
     status = run(p,(size_t)length,count,(int)n,shorted,start,stop,selected,(int)rows,
-                 operation,cal,(uint8_t *)buffer.buf,(size_t)width,(size_t)column,low,high,steps,errors);
+                 operation,cal,(uint8_t *)buffer.buf,(size_t)width,(size_t)column,low,high,errors);
     Py_END_ALLOW_THREADS
     if (buffer.obj) PyBuffer_Release(&buffer);
     if (status) { PyErr_Format(PyExc_ValueError, "Native schema-9 integrity check failed (%d)", status); return NULL; }
@@ -207,8 +206,7 @@ static PyObject *process(PyObject *self, PyObject *args) {
     PyObject *result = PyTuple_New(rows);
     if (!result) return NULL;
     for (Py_ssize_t row = 0; row < rows; ++row) {
-        PyObject *item = operation == 0 ? Py_BuildValue("LLK", (long long)low[row], (long long)high[row],
-            (unsigned long long)steps[row]) : PyFloat_FromDouble(errors[row]);
+        PyObject *item = operation == 0 ? Py_BuildValue("LL", (long long)low[row], (long long)high[row]) : PyFloat_FromDouble(errors[row]);
         if (!item) { Py_DECREF(result); return NULL; }
         PyTuple_SET_ITEM(result,row,item);
     }

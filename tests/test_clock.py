@@ -116,10 +116,9 @@ class ClockTests(unittest.TestCase):
         self.path.write_bytes(data)
         self.assertEqual(self.open().at_sample(3), first)
 
-    def test_timezone_required_and_aware(self) -> None:
+    def test_beijing_default_and_explicit_timezone(self) -> None:
         estimate = self.open().at_sample(2)
-        with self.assertRaises(TypeError):
-            estimate.to_datetime()
+        self.assertEqual(estimate.to_datetime(), datetime(1970, 1, 1, 8, tzinfo=timezone(timedelta(hours=8))))
         with self.assertRaises(TypeError):
             estimate.to_datetime(None)
         self.assertEqual(estimate.to_datetime("UTC"), datetime(1970, 1, 1, tzinfo=timezone.utc))
