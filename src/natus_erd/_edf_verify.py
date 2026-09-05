@@ -22,6 +22,7 @@ def verify_export(
 ) -> None:
     """Validate all digital codes/TALs and compare bounded windows to ERD."""
     import numpy as np
+    from numpy.typing import NDArray
     from .edf_export import _tal
     from .clock import ClockEstimate
 
@@ -71,13 +72,13 @@ def verify_export(
 
         def check_block(first, payload):
             count = len(payload)//record_bytes
-            codes = np.ndarray((count, rows, plan.record_samples), dtype="<i2",
+            codes: NDArray[np.int16] = np.ndarray((count, rows, plan.record_samples), dtype="<i2",
                                buffer=payload, strides=(record_bytes, plan.record_samples*2, 2))
             if np.any(codes < minimum) or np.any(codes > maximum):
                 raise DataIntegrityError("EDF sample code is outside its declared digital range")
             if shorted_rows and np.any(codes[:, shorted_rows] != 32767):
                 raise DataIntegrityError("EDF shorted channel differs from digital 32767")
-            annotations = np.ndarray((count, plan.annotation_bytes), dtype="u1", buffer=payload,
+            annotations: NDArray[np.uint8] = np.ndarray((count, plan.annotation_bytes), dtype="u1", buffer=payload,
                                      offset=wave_bytes, strides=(record_bytes, 1))
             expected = bytearray(count*plan.annotation_bytes)
             for offset in range(count):
@@ -125,7 +126,7 @@ def verify_export(
             last_record = (stop+plan.record_samples-1)//plan.record_samples
             stream.seek(header_bytes+first_record*record_bytes)
             payload = stream.read((last_record-first_record)*record_bytes)
-            codes = np.ndarray((last_record-first_record, rows, plan.record_samples), dtype="<i2",
+            codes: NDArray[np.int16] = np.ndarray((last_record-first_record, rows, plan.record_samples), dtype="<i2",
                                buffer=payload, strides=(record_bytes, plan.record_samples*2, 2))
             values = codes.transpose(1, 0, 2).reshape(rows, -1)[:, start-first_record*plan.record_samples:stop-first_record*plan.record_samples]
             batch_rows = max(1, min(rows, reader.limits.max_selected_channels,
