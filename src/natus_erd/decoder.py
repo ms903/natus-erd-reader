@@ -99,6 +99,7 @@ def decode_schema9_packet(
     import numpy as np
 
     shape = (len(selected), stop - start)
+    output: NDArray[np.float64]
     if out is None:
         output = np.full(shape, np.nan, dtype=np.float64)
     else:

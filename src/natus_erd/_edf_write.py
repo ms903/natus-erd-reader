@@ -109,7 +109,7 @@ def write_export(reader, path, *, max_error_uv, progress, **options):
                     if len(tal) > plan.annotation_bytes:
                         raise DataIntegrityError("EDF annotation layout changed after preflight")
                     payload[offset, wave_bytes:wave_bytes+len(tal)] = np.frombuffer(tal, dtype="u1")
-                output.write(memoryview(payload))
+                output.write(payload.data)
                 record_index += count
                 if progress and time.perf_counter()-last_notice >= 1:
                     progress({"stage": "write", "records": record_index, "total": plan.record_count,
