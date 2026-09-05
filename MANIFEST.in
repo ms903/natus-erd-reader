@@ -1,11 +1,12 @@
 include README.md LICENSE THIRD_PARTY_NOTICES.md CHANGELOG.md CONTRIBUTING.md SECURITY.md
-include pyproject.toml MANIFEST.in
-recursive-include src/natus_erd *.py py.typed
+include pyproject.toml MANIFEST.in setup.py
+recursive-include src/natus_erd *.py *.pyi *.c py.typed
 recursive-include tests *.py
 recursive-include tools *.py
 recursive-include examples *.py
+prune archive
 prune data
 prune figures
 prune reports
 prune .github
-global-exclude __pycache__ *.py[cod] *.erd *.etc *.stc *.eeg *.ent *.edf *.bdf *.npy *.npz
+global-exclude __pycache__ *.py[cod] *.erd *.etc *.stc *.eeg *.ent *.snc *.edf *.bdf *.npy *.npz

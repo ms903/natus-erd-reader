@@ -140,7 +140,7 @@ class DecoderBudgetTests(unittest.TestCase):
             ({"byte_end": 2**31}, DataIntegrityError),
             ({"byte_end": 1}, DataIntegrityError),
             ({"selected": (-1,)}, ValueError),
-            ({"selected": (True,)}, ValueError),
+            ({"selected": (True,)}, TypeError),
         ):
             with self.subTest(overrides=overrides):
                 stream = SpyStream(small_packet())

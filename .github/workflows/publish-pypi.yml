@@ -1,13 +1,11 @@
 name: Publish GitHub Release to PyPI
 
 on:
-  # Deliberately manual: publishing a GitHub Release does not publish to PyPI.
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing public stable release tag to publish
+        description: Existing public release tag to publish
         required: true
-        default: v0.2.1
         type: string
 
 permissions: {}
@@ -40,10 +38,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Expected a stable release tag of the form vX.Y.Z" >&2
-            exit 1
-          fi
           gh release view "$RELEASE_TAG" --json tagName,isDraft,isPrerelease,assets > release.json
           python - <<'PY'
           import json
@@ -53,53 +47,20 @@ jobs:
           tag = os.environ["RELEASE_TAG"]
           version = tag[1:]
           release = json.loads(Path("release.json").read_text())
-          expected = {
-              f"natus_erd_reader-{version}-py3-none-any.whl",
-              f"natus_erd_reader-{version}.tar.gz",
-          }
-          distributions = [
-              item["name"] for item in release["assets"]
-              if item["name"].endswith((".whl", ".tar.gz"))
-          ]
-          if (
-              release["tagName"] != tag or release["isDraft"] or release["isPrerelease"]
-              or len(distributions) != 2 or set(distributions) != expected
-          ):
-              raise SystemExit("Release must be public and stable with exactly the expected wheel and sdist")
+          import re
+          if not re.fullmatch(r"v\d+\.\d+\.\d+(?:rc\d+)?", tag):
+              raise SystemExit("Expected vX.Y.Z or vX.Y.ZrcN")
+          if release["tagName"] != tag or release["isDraft"] or release["isPrerelease"] != ("rc" in version):
+              raise SystemExit("Release status does not match its version")
           PY
-          version="${RELEASE_TAG#v}"
-          gh release download "$RELEASE_TAG" --dir dist \
-            --pattern "natus_erd_reader-${version}-py3-none-any.whl" \
-            --pattern "natus_erd_reader-${version}.tar.gz"
+          gh release download "$RELEASE_TAG" --dir dist --pattern '*.whl' --pattern '*.tar.gz'
       - name: Audit archive contents and package metadata
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           python -m pip install twine
-          python tools/check_dist.py dist
+          python tools/check_dist.py dist --version "${RELEASE_TAG#v}" --complete
           python -m twine check --strict dist/*
-          python - <<'PY'
-          import email.parser
-          import os
-          import tarfile
-          import zipfile
-          from pathlib import Path
-
-          version = os.environ["RELEASE_TAG"][1:]
-          stem = f"natus_erd_reader-{version}"
-          expected = {f"{stem}-py3-none-any.whl", f"{stem}.tar.gz"}
-          if {item.name for item in Path("dist").iterdir()} != expected:
-              raise SystemExit("Unexpected file in the publication directory")
-          with zipfile.ZipFile(Path("dist", f"{stem}-py3-none-any.whl")) as wheel:
-              wheel_metadata = wheel.read(f"natus_erd_reader-{version}.dist-info/METADATA")
-          with tarfile.open(Path("dist", f"{stem}.tar.gz"), "r:gz") as sdist:
-              with sdist.extractfile(f"{stem}/PKG-INFO") as metadata_file:
-                  source_metadata = metadata_file.read()
-          for raw_metadata in (wheel_metadata, source_metadata):
-              metadata = email.parser.BytesParser().parsebytes(raw_metadata)
-              if metadata.get_all("Name") != ["natus-erd-reader"] or metadata.get_all("Version") != [version]:
-                  raise SystemExit("Distribution identity does not match the requested release")
-          PY
           (cd dist && sha256sum *.whl *.tar.gz) > SHA256SUMS
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         id: upload

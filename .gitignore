@@ -7,7 +7,8 @@ build/
 dist/
 .natus-erd-test-*/
 
-# Local clinical recordings and derived results must never be published.
+# Local recordings and generated results.
+/archive/
 /data/
 /figures/
 /reports/
@@ -25,6 +26,10 @@ dist/
 *.avi
 *.mp4
 *.mov
+*.snc
+*.pyd
+*.so
+.natus-*-test-*/
 
 # Local environments and credentials.
 .venv*/

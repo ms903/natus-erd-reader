@@ -1,17 +1,11 @@
 # Third-party notices
 
-The original code in this project is distributed under the MIT license in
-`LICENSE`. Version 0.1.0 included ENT legacy-text normalization adapted from
-Wonambi's `wonambi/ioeeg/ktlx.py` (`_read_ent`). Version 0.2.0 removes that
-normalization and replaces it with a bounded parser written for this project;
-the parser does not translate text into Python source or evaluate it.
+Project code is covered by the MIT license in `LICENSE`. The BSD-3-Clause
+attribution for the earlier ENT normalization adapted from Wonambi is retained
+below. Wonambi is not a runtime or development dependency.
 
-The historical BSD-3-Clause attribution and terms are retained below. No
-Wonambi code is imported and Wonambi is not a runtime or development dependency.
-
-Upstream source: https://github.com/wonambi-python/wonambi/blob/master/wonambi/ioeeg/ktlx.py
-
-Upstream license: https://github.com/wonambi-python/wonambi/blob/master/LICENSE
+Source: https://github.com/wonambi-python/wonambi/blob/master/wonambi/ioeeg/ktlx.py
+License: https://github.com/wonambi-python/wonambi/blob/master/LICENSE
 
 ## Wonambi — BSD-3-Clause
 

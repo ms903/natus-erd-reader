@@ -7,6 +7,7 @@ from numbers import Integral
 from struct import unpack_from
 from typing import BinaryIO, TYPE_CHECKING
 
+from ._parameters import integer as _integer
 from .errors import DataIntegrityError
 from .limits import DEFAULT_LIMITS, ReadLimits, check_limit, check_output_size
 
@@ -17,11 +18,6 @@ if TYPE_CHECKING:
 
 _READ_CHUNK_BYTES = 64 * 1024
 
-
-def _integer(value: int, context: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, Integral):
-        raise ValueError(f"{context} must be an integer")
-    return int(value)
 
 
 def validate_packet_bounds(

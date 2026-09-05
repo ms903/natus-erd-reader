@@ -9,6 +9,8 @@ from .errors import (
 from .limits import ReadLimits
 from .models import ChannelInfo, Event, RecordingInfo, ValidationReport
 from .reader import NatusERDReader
+from .clock import ClockAnchor, ClockEstimate, SNCClock
+from .edf_export import EdfExportPlan, EdfExportResult, export_edf, plan_edf
 
 __all__ = [
     "ChannelInfo",
@@ -21,6 +23,13 @@ __all__ = [
     "ResourceLimitError",
     "UnsupportedFormatError",
     "ValidationReport",
+    "ClockAnchor",
+    "ClockEstimate",
+    "SNCClock",
+    "EdfExportPlan",
+    "EdfExportResult",
+    "export_edf",
+    "plan_edf",
 ]
 
-__version__ = "0.2.1"
+__version__ = "0.3.0rc1"

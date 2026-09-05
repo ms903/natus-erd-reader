@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, TypeAlias
 if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
+    from .clock import SNCClock
 
 from .binary import (
     ERD_HEADER_SIZE,
@@ -35,6 +36,7 @@ from .ent import (
     events_from_notes,
     read_ent_notes,
 )
+from ._parameters import integer as _integer
 from .errors import DataIntegrityError, ResourceLimitError, UnsupportedFormatError
 from .limits import DEFAULT_LIMITS, ReadLimits, check_limit, check_output_size
 from .models import ChannelInfo, Event, RecordingInfo, ValidationReport
@@ -96,6 +98,17 @@ class NatusERDReader:
 
         self._notes = self._load_notes()
         montage_names = channel_names_from_notes(self._notes, limits=self._limits)
+        # This Quantum layout has a 512-AC configuration-name table but only
+        # 256 AC channels in ERD. Accept the expanded layout only when its
+        # complete auxiliary suffix confirms the native slot interpretation.
+        # Never use configuration capacity as the number of stored channels.
+        auxiliary_names = tuple(f"DC{i}" for i in range(1, 17)) + ("TRIG", "OSAT", "PR", "Pleth")
+        if len(montage_names) > self._erd_header.n_channels:
+            suffix = montage_names[512:532]
+            if len(montage_names) == 532 and suffix == auxiliary_names:
+                montage_names = montage_names[:256] + suffix + montage_names[256:512]
+            else:
+                montage_names = montage_names[:256] + (None,)*20 + montage_names[256:]
         channel_names = complete_channel_names(montage_names, self._erd_header.n_channels)
 
         self._channels = tuple(
@@ -109,6 +122,7 @@ class NatusERDReader:
                 scale_uv_per_count=(
                     self._uv_scale if index < SIGNAL_CHANNEL_COUNT else None
                 ),
+                name_resolved=(index < len(montage_names) and montage_names[index] is not None),
             )
             for index in range(self._erd_header.n_channels)
         )
@@ -149,12 +163,7 @@ class NatusERDReader:
             raise TypeError("limits must be a ReadLimits instance")
         source = Path(path).expanduser().resolve(strict=True)
         stc_path, files = resolve_recording(source, limits=limits)
-        if cls is NatusERDReader:
-            reader = cls(stc_path, limits=limits, _files=files)
-        else:
-            # Preserve subclasses implementing the original constructor. They
-            # may build a second name index, but need not accept internal args.
-            reader = cls(stc_path, limits=limits)
+        reader = cls(stc_path, limits=limits, _files=files)
         if source.suffix.casefold() == ".erd" and source.is_file():
             if not any(
                 source == reader._segment_paths(segment)[0]
@@ -176,10 +185,62 @@ class NatusERDReader:
     def channels(self) -> tuple[ChannelInfo, ...]:
         return self._channels
 
+    def read_clock(self) -> "SNCClock":
+        """Read SNC synchronization anchors without loading waveform data.
+
+        The clock preserves raw UTC FILETIME values. Mapping between anchors
+        is an estimate; extrapolation and display timezone are explicit choices.
+        File creation timestamps are never substituted for acquisition time.
+        """
+        from .clock import SNCClock
+
+        path = self._files.lookup(self._stc_path.stem + ".snc", optional=True)
+        if path is None:
+            raise FileNotFoundError("No SNC synchronization file for this recording")
+        return SNCClock.from_file(
+            path, sample_rate=self.info.sample_rate,
+            start_stamp=self.info.start_stamp, end_stamp=self.info.end_stamp,
+            limits=self.limits,
+        )
+
+    def iter_stored_ranges(
+        self, start: int = 0, stop: int | None = None,
+    ) -> Iterator[tuple[int, int]]:
+        """Yield contiguous stored [start, stop) sample ranges, excluding gaps.
+
+        Only STC/ETC metadata is read. Adjacent packets and segments are merged
+        without retaining an index for the entire recording. Shorted channels
+        do not change temporal coverage. No NumPy import or waveform reads.
+        """
+        first = _integer(start, "start")
+        last = self.info.n_samples if stop is None else _integer(stop, "stop")
+        if not 0 <= first <= last <= self.info.n_samples:
+            raise IndexError("sample range is outside the recording")
+        pending: tuple[int, int] | None = None
+        for segment in self._overlapping_segments(
+            first + self._origin_stamp, last + self._origin_stamp,
+        ):
+            for entry in self._load_etc(segment).entries:
+                a = max(first, entry.sample_stamp - self._origin_stamp)
+                b = min(last, entry.end_stamp_exclusive - self._origin_stamp)
+                if a >= b:
+                    continue
+                if pending is None:
+                    pending = (a, b)
+                elif a == pending[1]:
+                    pending = (pending[0], b)
+                elif a > pending[1]:
+                    yield pending
+                    pending = (a, b)
+                else:
+                    raise DataIntegrityError("Stored sample ranges overlap")
+        if pending is not None:
+            yield pending
+
     def sample_to_stamp(self, sample: int) -> int:
         """Convert a relative sample index to the native STC stamp."""
 
-        value = _integer("sample", sample)
+        value = _integer(sample, "sample")
         if not 0 <= value <= self.info.n_samples:
             raise IndexError("sample is outside the recording")
         return self._origin_stamp + value
@@ -187,7 +248,7 @@ class NatusERDReader:
     def stamp_to_sample(self, stamp: int) -> int:
         """Convert a native STC stamp to a relative sample index."""
 
-        value = _integer("stamp", stamp)
+        value = _integer(stamp, "stamp")
         sample = value - self._origin_stamp
         if not 0 <= sample <= self.info.n_samples:
             raise IndexError("stamp is outside the recording")
@@ -207,8 +268,8 @@ class NatusERDReader:
         to process larger intervals without retaining the whole recording.
         """
 
-        start_value = _integer("start", start)
-        stop_value = _integer("stop", stop)
+        start_value = _integer(start, "start")
+        stop_value = _integer(stop, "stop")
         if not 0 <= start_value <= stop_value <= self.info.n_samples:
             raise IndexError(
                 f"sample range must satisfy 0 <= start <= stop <= {self.info.n_samples}"
@@ -317,9 +378,9 @@ class NatusERDReader:
         Each chunk is subject to the same limits as read_samples. Keeping all
         yielded arrays in a list defeats streaming and uses caller-owned RAM.
         """
-        first = _integer("start", start)
-        last = self.info.n_samples if stop is None else _integer("stop", stop)
-        chunk = _integer("chunk_samples", chunk_samples)
+        first = _integer(start, "start")
+        last = self.info.n_samples if stop is None else _integer(stop, "stop")
+        chunk = _integer(chunk_samples, "chunk_samples")
         if not 0 <= first <= last <= self.info.n_samples:
             raise IndexError("iterator sample bounds are outside the recording")
         if chunk <= 0:
@@ -341,7 +402,7 @@ class NatusERDReader:
                 self._events = events_from_notes(self._notes, self._origin_stamp)
             return self._events
 
-    def validate(self, *, deep: bool = True) -> ValidationReport:
+    def validate(self) -> ValidationReport:
         """Validate file pairs, headers, ETC offsets, and timestamp coverage."""
 
         packet_count = 0
@@ -355,9 +416,8 @@ class NatusERDReader:
                 raise DataIntegrityError(
                     f"Missing ERD/ETC pair for STC segment {segment.index}"
                 )
-            if deep:
-                with self._cache_lock:
-                    self._etc_cache.pop(segment.index, None)
+            with self._cache_lock:
+                self._etc_cache.pop(segment.index, None)
 
             entries = self._load_etc(segment).entries
             packet_count += len(entries)
@@ -393,6 +453,8 @@ class NatusERDReader:
             stored_samples=stored_samples,
             missing_samples=missing_samples,
             event_count=len(self.read_events()),
+            ent_record_count=len(self._notes),
+            unparsed_ent_record_count=sum(note.value is None for note in self._notes),
         )
 
     def _find_header_erd(self) -> Path:
@@ -523,10 +585,10 @@ class NatusERDReader:
             check_limit(len(resolved) + 1, self._limits.max_selected_channels, "Selected channel count")
             if isinstance(selector, str):
                 if selector not in self._name_lookup:
-                    raise KeyError(f"Unknown channel name: {selector}")
+                    raise ValueError(f"Unknown channel name: {selector}")
                 index = self._name_lookup[selector]
                 if index is None:
-                    raise KeyError(f"Ambiguous channel name: {selector}")
+                    raise ValueError(f"Ambiguous channel name: {selector}")
                 resolved.append(index)
             elif isinstance(selector, Integral) and not isinstance(selector, bool):
                 index = int(selector)
@@ -537,11 +599,6 @@ class NatusERDReader:
                 raise TypeError(f"Invalid channel selector: {selector!r}")
         return tuple(resolved)
 
-
-def _integer(name: str, value: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, Integral):
-        raise TypeError(f"{name} must be an integer")
-    return int(value)
 
 
 def _stat_signature(value: os.stat_result) -> tuple[int, int, int, int]:
@@ -561,7 +618,3 @@ def _header_signature(header: ErdHeader) -> tuple[object, ...]:
         header.shorted,
         header.frequency_factors,
     )
-
-
-def _resolve_stc(path: Path, *, limits: ReadLimits = DEFAULT_LIMITS) -> Path:
-    return resolve_recording(path, limits=limits)[0]

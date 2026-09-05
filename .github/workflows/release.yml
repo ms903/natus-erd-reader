@@ -7,35 +7,43 @@ on:
 permissions:
   contents: read
 
-# Bound the test runner's numerical backend; the library never sets this.
-env:
-  OPENBLAS_NUM_THREADS: "1"
-  OMP_NUM_THREADS: "1"
-
 jobs:
+  assets:
+    uses: ./.github/workflows/build-assets.yml
+
   release:
+    needs: assets
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: "3.12"
-      - run: python -m pip install build twine .
-      - name: Check tag matches package version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: python -c "import os, natus_erd; assert os.environ['RELEASE_TAG'] == 'v' + natus_erd.__version__"
-      - run: python -m unittest discover -v -s tests -t .
-      - run: python -m build
-      - run: python -m twine check dist/*
-      - run: python tools/check_dist.py dist
-      - name: Publish audited archives to GitHub Releases
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: release-assets
+          path: dist
+      - name: Publish audited versioned assets
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" dist/* --verify-tag --title "$RELEASE_TAG" --notes-file CHANGELOG.md
+        run: |
+          python - <<'PY'
+          import os, subprocess, tomllib
+          from pathlib import Path
+          from tools.check_dist import audit_set
+          version = tomllib.loads(Path('pyproject.toml').read_text())['project']['version']
+          tag = os.environ['RELEASE_TAG']
+          assert tag == 'v'+version, 'Tag does not match package version'
+          assets = audit_set(Path('dist'), version, complete=True)
+          command = ['gh', 'release', 'create', tag, *map(str, assets), '--verify-tag',
+                     '--title', tag, '--notes-file', 'CHANGELOG.md']
+          if 'rc' in version:
+              command.append('--prerelease')
+          subprocess.run(command, check=True)
+          PY

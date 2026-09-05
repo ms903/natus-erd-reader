@@ -133,16 +133,6 @@ def _generic_from_bytes(data: bytes, path: Path) -> GenericHeader:
     return GenericHeader(file_schema, base_schema, creation_time)
 
 
-def read_generic_header(path: Path) -> GenericHeader:
-    regular_file_size(path)
-    try:
-        with path.open("rb") as stream:
-            data = stream.read(GENERIC_HEADER_SIZE)
-    except OSError as exc:
-        raise DataIntegrityError(f"Cannot read {path.name}: {exc}") from exc
-    return _generic_from_bytes(data, path)
-
-
 def read_erd_header(path: Path) -> ErdHeader:
     regular_file_size(path)
     try:

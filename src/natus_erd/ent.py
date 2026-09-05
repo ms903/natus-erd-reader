@@ -253,7 +253,7 @@ def _parse_note(text: str, limits: ReadLimits, budget: _ParseBudget) -> Any | No
         return None
 
 
-def _safe_parse_excel(text: str, *, limits: ReadLimits = DEFAULT_LIMITS) -> Any | None:
+def _parse_ent_text(text: str, *, limits: ReadLimits = DEFAULT_LIMITS) -> Any | None:
     """Parse ENT literals; unknown syntax returns None, resource violations raise.
 
     Function calls, attributes, operators and comprehensions are not supported.

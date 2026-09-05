@@ -202,3 +202,51 @@ def _ent_file() -> bytes:
         previous_length = length
     output.extend(bytes(16))
     return bytes(output)
+
+
+from datetime import datetime, timedelta, timezone
+from fractions import Fraction
+
+SNC_GUID = bytes.fromhex("d2a98660af60d311986000104b75c151")
+BASE_DATETIME = datetime(2000, 1, 1, 12, 0, 0, 125000, tzinfo=timezone.utc)
+BASE_TICKS = ((BASE_DATETIME - datetime(1601, 1, 1, tzinfo=timezone.utc))
+              // timedelta(microseconds=1)) * 10
+
+
+def _snc(path, rate, end=1009):
+    header = bytearray(352)
+    header[:16] = SNC_GUID
+    pack_into("<HH", header, 16, 1, 1)
+    last_ticks = BASE_TICKS + round(Fraction(end - 1000) / Fraction(str(rate)) * 10_000_000)
+    path.write_bytes(header + pack("<iQ", 1000, BASE_TICKS) + pack("<iQ", end, last_ticks))
+
+
+def _annotation_layout(payload):
+    signals = int(payload[252:256])
+    header_bytes = int(payload[184:192])
+    samples_start = 256 + signals * (16 + 80 + 8 * 5 + 80)
+    counts = [int(payload[samples_start + 8 * i:samples_start + 8 * (i + 1)])
+              for i in range(signals)]
+    record_bytes = sum(counts) * 2
+    return header_bytes + sum(counts[:-1]) * 2, counts[-1] * 2, record_bytes
+
+
+def build_continuous_recording(root: Path, *, sample_rate: float = 512.0,
+                               samples: int = 1024, packet_samples: int = 63) -> SyntheticRecording:
+    """Continuous, multi-packet signal with calibrated and exact auxiliary rows."""
+    fixture = build_recording(root, sample_rate=sample_rate)
+    values = [[1500+channel+((sample*7)%257)*2 for channel in range(N_CHANNELS)]
+              for sample in range(samples)]
+    erd = bytearray(_erd_header(sample_rate=sample_rate))
+    etc = bytearray(_generic_header(3))
+    for start in range(0, samples, packet_samples):
+        block = values[start:start+packet_samples]
+        etc.extend(pack("<iiihh", len(erd), 1000+start, start, len(block), 0))
+        erd.extend(_encode_packet(block))
+    fixture.first_erd.write_bytes(erd)
+    fixture.first_erd.with_suffix('.etc').write_bytes(etc)
+    fixture.stc.write_bytes(_generic_header(1)+pack("<ii12i", 1, 1, *([0]*12))
+                            +_stc_entry(fixture.stc.stem, 1000, 999+samples, 0))
+    _snc(fixture.stc.with_suffix('.snc'), sample_rate, 999+samples)
+    return SyntheticRecording(fixture.directory, fixture.stc, fixture.eeg, fixture.first_erd,
+                               tuple(tuple(row) for row in zip(*values)))

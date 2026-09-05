@@ -4,7 +4,6 @@ import os
 import subprocess
 import sys
 import unittest
-from importlib.util import find_spec
 from importlib.resources import files
 from pathlib import Path
 
@@ -13,18 +12,13 @@ import natus_erd
 
 class PackageContractTests(unittest.TestCase):
     def test_public_exports_and_version(self) -> None:
-        self.assertRegex(natus_erd.__version__, r"^\d+\.\d+\.\d+$")
+        self.assertRegex(natus_erd.__version__, r"^\d+\.\d+\.\d+(?:rc\d+)?$")
         for name in natus_erd.__all__:
             self.assertIsNotNone(getattr(natus_erd, name))
 
-    def test_typed_marker_and_python_only_surface(self) -> None:
+    def test_typed_marker(self) -> None:
         root = files("natus_erd")
         self.assertTrue(root.joinpath("py.typed").is_file())
-        for name in ("cli", "__main__", "edf", "viewer"):
-            with self.subTest(module=name):
-                self.assertIsNone(find_spec(f"natus_erd.{name}"))
-        for name in ("EDFInfo", "EDFReader", "EDFSignal"):
-            self.assertFalse(hasattr(natus_erd, name))
 
     def test_import_does_not_load_numpy_or_change_environment(self) -> None:
         environment = os.environ.copy()

@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 
 from natus_erd.decoder import decode_schema9_packet
-from natus_erd.ent import _safe_parse_excel
+from natus_erd.ent import _parse_ent_text
 from natus_erd.errors import DataIntegrityError
 
 
@@ -18,14 +18,14 @@ class EntSafetyTests(unittest.TestCase):
         with patch("builtins.eval", side_effect=AssertionError("eval was called")), patch.object(
             ast, "literal_eval", side_effect=AssertionError("AST evaluation was called")
         ):
-            parsed = _safe_parse_excel(event)
+            parsed = _parse_ent_text(event)
         self.assertEqual(parsed["Stamp"], 42)
         self.assertEqual(parsed["Text"], "safe")
 
     def test_expression_is_not_executed(self) -> None:
         expression = '__import__("os").system("this-must-not-run")'
         with patch.object(ast, "literal_eval", side_effect=AssertionError("AST evaluation was called")) as literal:
-            self.assertIsNone(_safe_parse_excel(expression))
+            self.assertIsNone(_parse_ent_text(expression))
         literal.assert_not_called()
 
 

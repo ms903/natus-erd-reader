@@ -10,7 +10,7 @@ import warnings
 import zipfile
 from pathlib import Path
 
-from tools.check_dist import REQUIRED_PACKAGE_FILES, audit, check_member
+from tools.check_dist import REQUIRED_PACKAGE_FILES, audit, audit_set, check_member
 
 
 class DistributionAuditTests(unittest.TestCase):
@@ -24,9 +24,12 @@ class DistributionAuditTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root)
 
     def _wheel(self, extra: list[str | zipfile.ZipInfo] | None = None) -> Path:
-        path = self.root / "synthetic.whl"
+        path = self.root / "natus_erd_reader-0.2.0-py3-none-any.whl"
         names: list[str | zipfile.ZipInfo] = sorted(REQUIRED_PACKAGE_FILES)
         names.extend([
+            "natus_erd/reader.py",
+            "natus_erd_reader-0.2.0.dist-info/METADATA",
+            "natus_erd_reader-0.2.0.dist-info/WHEEL",
             "natus_erd_reader-0.2.0.dist-info/licenses/LICENSE",
             "natus_erd_reader-0.2.0.dist-info/licenses/THIRD_PARTY_NOTICES.md",
         ])
@@ -35,29 +38,41 @@ class DistributionAuditTests(unittest.TestCase):
             warnings.simplefilter("ignore", UserWarning)
             with zipfile.ZipFile(path, "w") as archive:
                 for name in names:
-                    archive.writestr(name, b"synthetic")
+                    payload = b"synthetic"
+                    if name == "natus_erd/__init__.py":
+                        payload = b'__version__ = "0.2.0"\n'
+                    elif isinstance(name, str) and name.endswith("/METADATA"):
+                        payload = b"Metadata-Version: 2.4\nName: natus-erd-reader\nVersion: 0.2.0\n"
+                    elif isinstance(name, str) and name.endswith("/WHEEL"):
+                        payload = b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+                    archive.writestr(name, payload)
         return path
 
     def _sdist(self, extra: list[str | tarfile.TarInfo] | None = None) -> Path:
-        path = self.root / "synthetic.tar.gz"
+        path = self.root / "natus_erd_reader-0.2.0.tar.gz"
         entries: list[str | tarfile.TarInfo] = [
             "synthetic/LICENSE", "synthetic/THIRD_PARTY_NOTICES.md",
-            "synthetic/src/natus_erd/__init__.py",
+            "synthetic/src/natus_erd/__init__.py", "synthetic/PKG-INFO",
         ]
         entries.extend(extra or [])
         with tarfile.open(path, "w:gz") as archive:
             for item in entries:
                 if isinstance(item, str):
                     info = tarfile.TarInfo(item)
-                    info.size = 9
-                    archive.addfile(info, io.BytesIO(b"synthetic"))
+                    payload = (b"Metadata-Version: 2.4\nName: natus-erd-reader\nVersion: 0.2.0\n"
+                               if item.endswith("/PKG-INFO") else b"synthetic")
+                    if item.endswith('/__init__.py'):
+                        payload = b'__version__ = "0.2.0"\n'
+                    info.size = len(payload)
+                    archive.addfile(info, io.BytesIO(payload))
                 else:
                     archive.addfile(item)
         return path
 
     def test_minimal_python_only_archives_pass(self) -> None:
-        self.assertEqual(audit(self._wheel()), len(REQUIRED_PACKAGE_FILES) + 2)
-        self.assertEqual(audit(self._sdist()), 3)
+        self.assertEqual(audit(self._wheel()), len(REQUIRED_PACKAGE_FILES) + 5)
+        self.assertEqual(audit(self._sdist()), 4)
+
 
     def test_windows_drive_and_alternate_stream_paths_are_rejected(self) -> None:
         for name, wheel in (
@@ -74,16 +89,6 @@ class DistributionAuditTests(unittest.TestCase):
             with self.subTest(part=part), self.assertRaisesRegex(ValueError, "Local environment"):
                 check_member(f"synthetic/src/{part}", 1, wheel=False)
 
-    def test_removed_features_and_all_entry_points_are_rejected(self) -> None:
-        for name in (
-            "natus_erd/cli.py", "natus_erd/__main__.py", "natus_erd/edf.py",
-            "natus_erd/viewer.py", "natus_erd/web/index.html",
-            "natus_erd_reader-0.2.0.dist-info/entry_points.txt",
-        ):
-            with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Removed non-ERD"):
-                audit(self._wheel([name]))
-        with self.assertRaisesRegex(ValueError, "Removed non-ERD"):
-            audit(self._sdist(["synthetic/src/natus_erd_reader.egg-info/entry_points.txt"]))
 
     def test_duplicate_and_canonical_duplicate_zip_members_are_rejected(self) -> None:
         for name in (
@@ -125,6 +130,18 @@ class DistributionAuditTests(unittest.TestCase):
         info.type = tarfile.DIRTYPE
         with self.assertRaisesRegex(ValueError, "Local environment"):
             audit(self._sdist([info]))
+
+    def test_expected_version_and_metadata_are_checked(self):
+        with self.assertRaisesRegex(ValueError, "identity"):
+            audit(self._wheel(), version="0.3.0rc1")
+        with self.assertRaisesRegex(ValueError, "identity"):
+            audit(self._sdist(), version="0.3.0rc1")
+
+    def test_release_requires_all_platforms(self):
+        self._wheel()
+        self._sdist()
+        with self.assertRaisesRegex(ValueError, "ten native wheels"):
+            audit_set(self.root, "0.2.0", complete=True)
 
 
 if __name__ == "__main__":

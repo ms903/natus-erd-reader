@@ -20,6 +20,10 @@ from ._fixture import build_recording
 
 
 class ReadLimitTests(unittest.TestCase):
+    def test_resource_limits_are_distinct_from_corruption(self) -> None:
+        from natus_erd import NatusERDError
+        self.assertEqual(ResourceLimitError.__bases__, (NatusERDError,))
+
     def setUp(self) -> None:
         self.root = Path.cwd() / f".natus-erd-test-{uuid.uuid4().hex}"
         self.root.mkdir()
@@ -27,8 +31,11 @@ class ReadLimitTests(unittest.TestCase):
         self.fixture = build_recording(self.root)
 
     def test_limits_are_positive_integers_and_immutable(self) -> None:
-        for value in (0, -1, True, 1.5, "1024", None):
+        for value in (0, -1):
             with self.subTest(value=value), self.assertRaises(ValueError):
+                ReadLimits(max_read_bytes=value)
+        for value in (True, 1.5, "1024", None):
+            with self.subTest(value=value), self.assertRaises(TypeError):
                 ReadLimits(max_read_bytes=value)
         with self.assertRaises(ValueError):
             ReadLimits(max_parse_depth=129)

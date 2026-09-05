@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import ast
+from email.parser import BytesParser
+import re
 import stat
 import tarfile
 import zipfile
@@ -10,26 +13,16 @@ from pathlib import Path, PurePosixPath
 
 
 FORBIDDEN_SUFFIXES = {
-    ".erd", ".etc", ".stc", ".eeg", ".ent", ".edf", ".bdf",
+    ".erd", ".etc", ".stc", ".eeg", ".ent", ".snc", ".edf", ".bdf",
     ".npy", ".npz", ".avi", ".mp4", ".mov", ".pem", ".key",
 }
-FORBIDDEN_PARTS = {"data", "figures", "reports", ".git", "__pycache__"}
-REMOVED_MEMBERS = {
-    "cli.py", "__main__.py", "edf.py", "viewer.py", "test_edf_viewer.py",
-    "compare_edf.py", "plot_error_summary.py", "entry_points.txt",
-}
+FORBIDDEN_PARTS = {"data", "figures", "reports", "archive", ".git", "__pycache__"}
 SOURCE_ROOT_FILES = {
     "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md",
     "CONTRIBUTING.md", "SECURITY.md", "pyproject.toml", "MANIFEST.in",
-    "PKG-INFO", "setup.cfg",
+    "PKG-INFO", "setup.cfg", "setup.py",
 }
-REQUIRED_PACKAGE_FILES = {
-    "natus_erd/__init__.py", "natus_erd/py.typed",
-    "natus_erd/_paths.py",
-    "natus_erd/reader.py", "natus_erd/decoder.py", "natus_erd/binary.py",
-    "natus_erd/ent.py", "natus_erd/errors.py", "natus_erd/limits.py",
-    "natus_erd/models.py",
-}
+REQUIRED_PACKAGE_FILES = {"natus_erd/__init__.py", "natus_erd/py.typed"}
 
 
 def check_member(name: str, size: int, *, wheel: bool, directory: bool = False) -> None:
@@ -50,8 +43,6 @@ def check_member(name: str, size: int, *, wheel: bool, directory: bool = False) 
             return
         raise ValueError(f"Source file is outside its package root: {name}")
     lowered = {part.casefold() for part in parts}
-    if "web" in lowered or path.name.casefold() in REMOVED_MEMBERS:
-        raise ValueError(f"Removed non-ERD application feature in archive: {name}")
     if lowered & FORBIDDEN_PARTS:
         raise ValueError(f"Private/generated directory in archive: {name}")
     if path.suffix.casefold() in FORBIDDEN_SUFFIXES or ".ent.old" in name.casefold():
@@ -63,12 +54,15 @@ def check_member(name: str, size: int, *, wheel: bool, directory: bool = False) 
     if wheel:
         if parts[0] != "natus_erd" and not parts[0].endswith(".dist-info"):
             raise ValueError(f"Unexpected wheel root: {name}")
+    elif parts[0] == "src" and len(parts) > 1:
+        if parts[1] not in {"natus_erd", "natus_erd_reader.egg-info"}:
+            raise ValueError(f"Unexpected source package: {name}")
     elif parts[0] not in {"src", "tests", "tools", "examples"}:
         if len(parts) != 1 or parts[0] not in SOURCE_ROOT_FILES:
             raise ValueError(f"Unexpected source archive member: {name}")
 
 
-def audit(path: Path) -> int:
+def audit(path: Path, *, version: str | None = None) -> int:
     is_wheel = path.suffix == ".whl"
     if is_wheel:
         with zipfile.ZipFile(path) as archive:
@@ -112,19 +106,97 @@ def audit(path: Path) -> int:
     for notice in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
         if not any(PurePosixPath(name).name == notice for name in names):
             raise ValueError(f"Archive is missing license notice: {notice}")
+    metadata_names = [name for name in names if
+                      (name.endswith(".dist-info/METADATA") if is_wheel else name == next(iter(roots))+"/PKG-INFO")]
+    if len(metadata_names) != 1:
+        raise ValueError("Archive must contain one package metadata file")
+    metadata_name = metadata_names[0]
+    if is_wheel:
+        with zipfile.ZipFile(path) as archive:
+            raw = archive.read(metadata_name)
+            package_init = archive.read("natus_erd/__init__.py")
+    else:
+        with tarfile.open(path, "r:gz") as archive:
+            stream = archive.extractfile(metadata_name)
+            assert stream is not None
+            raw = stream.read()
+            stream = archive.extractfile(next(iter(roots))+"/src/natus_erd/__init__.py")
+            if stream is None:
+                raise ValueError("Source package initializer is missing")
+            package_init = stream.read()
+    metadata = BytesParser().parsebytes(raw)
+    identity = metadata.get("Version", "")
+    if (metadata.get_all("Name") != ["natus-erd-reader"]
+            or metadata.get_all("Version") != [identity]
+            or not re.fullmatch(r"\d+\.\d+\.\d+(?:rc\d+)?", identity)
+            or (version is not None and identity != version)):
+        raise ValueError("Distribution metadata identity does not match the release")
+    stem = f"natus_erd_reader-{identity}"
+    assignments = [node for node in ast.parse(package_init).body if isinstance(node, ast.Assign)
+                   and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)]
+    if len(assignments) != 1 or ast.literal_eval(assignments[0].value) != identity:
+        raise ValueError("Package source version does not match its metadata")
+    if (not path.name.startswith(stem+"-") if is_wheel else path.name != stem+".tar.gz"):
+        raise ValueError("Archive filename does not match its metadata")
+    if is_wheel:
+        if roots != {"natus_erd", stem+".dist-info"}:
+            raise ValueError("Unexpected wheel metadata directory")
+        if metadata_name != stem+".dist-info/METADATA":
+            raise ValueError("Wheel metadata directory does not match its version")
+        with zipfile.ZipFile(path) as archive:
+            wheel = BytesParser().parsebytes(archive.read(stem+".dist-info/WHEEL"))
+        tags = wheel.get_all("Tag", [])
+        filename_tags = path.name.removesuffix(".whl").rsplit("-", 3)[1:]
+        advertised = {f"{python}-{abi}-{platform}" for python in filename_tags[0].split(".")
+                      for abi in filename_tags[1].split(".") for platform in filename_tags[2].split(".")}
+        if set(tags) != advertised:
+            raise ValueError("Wheel tags do not match its filename")
+        native = any(name.endswith((".pyd", ".so")) for name in names)
+        pure = wheel.get("Root-Is-Purelib", "").lower() == "true"
+        if pure == native or (pure and advertised != {"py3-none-any"}):
+            raise ValueError("Wheel binary contents do not match its platform tags")
     return len(members)
+
+
+def audit_set(directory: Path, version: str, *, complete: bool = False) -> list[Path]:
+    """Check one version's assets; complete requires the supported wheel matrix."""
+    archives = sorted(directory.iterdir())
+    if not archives or any(not p.is_file() or not p.name.endswith((".whl", ".tar.gz")) for p in archives):
+        raise ValueError("Distribution directory must contain only wheel and source archives")
+    for path in archives:
+        audit(path, version=version)
+    if complete:
+        stem = f"natus_erd_reader-{version}"
+        required = {stem+"-py3-none-any.whl", stem+".tar.gz"}
+        names = {path.name for path in archives}
+        if not required <= names or len(names) != 12:
+            raise ValueError("Release requires a pure wheel, sdist and ten native wheels")
+        for python in ("cp310", "cp311", "cp312", "cp313", "cp314"):
+            for platform in ("win_amd64", "manylinux"):
+                matches = [n for n in names if n.startswith(f"{stem}-{python}-{python}-")
+                           and (n.endswith("-win_amd64.whl") if platform == "win_amd64"
+                                else "manylinux" in n and n.endswith("_x86_64.whl"))]
+                if len(matches) != 1:
+                    raise ValueError(f"Release requires one {python} {platform} wheel")
+    return archives
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path, nargs="?", default=Path("dist"))
+    parser.add_argument("--version")
+    parser.add_argument("--complete", action="store_true")
     args = parser.parse_args()
     archives = sorted(args.directory.glob("*.whl")) + sorted(args.directory.glob("*.tar.gz"))
     if not archives:
         parser.error("No wheel or source archives found")
+    if args.complete:
+        if not args.version:
+            parser.error("--complete requires --version")
+        audit_set(args.directory, args.version, complete=True)
     for archive in archives:
-        count = audit(archive)
-        print(f"PASS {archive.name}: {count} audited files; no recordings or reports")
+        count = audit(archive, version=args.version)
+        print(f"PASS {archive.name}: {count} audited files")
     return 0
 
 

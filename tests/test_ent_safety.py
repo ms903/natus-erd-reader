@@ -14,7 +14,7 @@ from natus_erd.ent import (
     EntNote,
     _find_named_value,
     _names_from_raw_montage,
-    _safe_parse_excel,
+    _parse_ent_text,
     channel_names_from_notes,
     events_from_notes,
     read_ent_notes,
@@ -52,7 +52,7 @@ class _ReadSpy(io.BytesIO):
 class EntTextSafetyTests(unittest.TestCase):
     def test_nested_unicode_fields_and_events(self) -> None:
         text = '(.(."Stamp", 1024), (."Text", "左侧事件（测试）"), (."Data", (.(."User", "研究者"))), (."Values", (-1, 2.5, 1e-3, True, None)))'
-        value = _safe_parse_excel(text)
+        value = _parse_ent_text(text)
         self.assertEqual(value["Values"], [-1, 2.5, 0.001, True, None])
         note = EntNote(1, 0, 0, text, value)
         event, = events_from_notes((note,), 1000)
@@ -60,7 +60,7 @@ class EntTextSafetyTests(unittest.TestCase):
 
     def test_quotes_backslashes_and_unicode_escapes_are_data(self) -> None:
         text = r'''(.(."Text", "quoted \"word\"\n\u5de6\x41"), (."Path", "D:\\data\\file"), (."Unknown", "\q"))'''
-        value = _safe_parse_excel(text)
+        value = _parse_ent_text(text)
         self.assertEqual(value["Text"], 'quoted "word"\n左A')
         # Recognized escapes are decoded; unknown ones are preserved.
         self.assertEqual(value["Path"], r"D:\data\file")
@@ -76,44 +76,44 @@ class EntTextSafetyTests(unittest.TestCase):
         )
         with patch("builtins.eval", side_effect=AssertionError("eval called")), patch.object(ast, "literal_eval", side_effect=AssertionError("literal_eval called")):
             for expression in expressions:
-                self.assertIsNone(_safe_parse_excel(expression))
-            self.assertEqual(_safe_parse_excel('(.(."Stamp", 42))'), {"Stamp": 42})
+                self.assertIsNone(_parse_ent_text(expression))
+            self.assertEqual(_parse_ent_text('(.(."Stamp", 42))'), {"Stamp": 42})
 
     def test_vendor_hex_literals_and_short_carriage_escape(self) -> None:
         # Entirely synthetic metadata: wide hex literals are vendor values,
         # and a short hex escape may precede a physical newline in a string.
         text = '(.(."Stamp", 42), (."Text", "first\\xd\nsecond"), (."Token", 0x00112233445566778899aabb), (."Offset", -0x20))'
-        value = _safe_parse_excel(text)
+        value = _parse_ent_text(text)
         self.assertEqual(value["Token"], int("00112233445566778899aabb", 16))
         self.assertEqual(value["Offset"], -32)
         self.assertEqual(value["Text"], "first\r\nsecond")
         note = EntNote(1, 0, 0, text, value)
         self.assertEqual(len(events_from_notes((note,), 0)), 1)
         for malformed in ("0x", "0x12gg", "0x20.__class__"):
-            self.assertIsNone(_safe_parse_excel(malformed))
+            self.assertIsNone(_parse_ent_text(malformed))
         with self.assertRaises(ResourceLimitError):
-            _safe_parse_excel("0x" + "f" * 64)
+            _parse_ent_text("0x" + "f" * 64)
 
     def test_depth_node_and_text_limits(self) -> None:
         limits = replace(DEFAULT_LIMITS, max_parse_depth=4, max_parse_nodes=8, max_ent_record_bytes=128)
         with self.assertRaises(ResourceLimitError):
-            _safe_parse_excel("(" * 5 + "0" + ")" * 5, limits=limits)
+            _parse_ent_text("(" * 5 + "0" + ")" * 5, limits=limits)
         with self.assertRaises(ResourceLimitError):
-            _safe_parse_excel("(" + ",".join(["0"] * 9) + ")", limits=limits)
+            _parse_ent_text("(" + ",".join(["0"] * 9) + ")", limits=limits)
         with self.assertRaises(ResourceLimitError):
-            _safe_parse_excel('"' + "x" * 128 + '"', limits=limits)
+            _parse_ent_text('"' + "x" * 128 + '"', limits=limits)
         with self.assertRaises(ResourceLimitError):
-            _safe_parse_excel('"' + "左" * 50 + '"', limits=limits)
+            _parse_ent_text('"' + "左" * 50 + '"', limits=limits)
         with self.assertRaises(ResourceLimitError):
-            _safe_parse_excel("9" * 65)
+            _parse_ent_text("9" * 65)
 
     def test_malformed_literals_do_not_guess_values(self) -> None:
         for text in ("", "(", "(1 2)", "(,1)", "(1,,2)", '(.(."Stamp",1),(."Stamp",2))', '(.(."Text", "unterminated))', '(.(."Value", 1e999))', '(.(."Text", "\\xQQ"))'):
-            self.assertIsNone(_safe_parse_excel(text), repr(text))
+            self.assertIsNone(_parse_ent_text(text), repr(text))
 
     def test_nonstandard_montage_extracts_only_quoted_channel_list(self) -> None:
         text = '''(.(."VendorGeometry", [unsupported vendor syntax]), (."ChanNames", ("A1", "B'12", "左侧")), (."Text", "Montage"))'''
-        self.assertIsNone(_safe_parse_excel(text))
+        self.assertIsNone(_parse_ent_text(text))
         self.assertEqual(_names_from_raw_montage(text), ("A1", "B'12", "左侧"))
         note = EntNote(2, 0, 0, text, None)
         self.assertEqual(channel_names_from_notes((note,)), ("A1", "B'12", "左侧"))

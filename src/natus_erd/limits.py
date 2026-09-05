@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, fields
-from numbers import Integral
+from ._parameters import integer
 
 from .errors import ResourceLimitError
 
@@ -24,6 +24,7 @@ class ReadLimits:
     max_segments: int = 10_000
     max_packets_per_segment: int = 20_000
     max_cached_segments: int = 4
+    max_clock_anchors: int = 10_000
     max_selected_channels: int = 1024
     max_directory_entries: int = 20_000
     max_ent_bytes: int = 8 * 1024**2
@@ -35,8 +36,8 @@ class ReadLimits:
 
     def __post_init__(self) -> None:
         for field in fields(self):
-            value = getattr(self, field.name)
-            if isinstance(value, bool) or not isinstance(value, Integral) or value <= 0:
+            value = integer(getattr(self, field.name), field.name)
+            if value <= 0:
                 raise ValueError(f"{field.name} must be a positive integer")
             # Normalize integer subclasses to avoid overflow in their operators.
             object.__setattr__(self, field.name, int(value))

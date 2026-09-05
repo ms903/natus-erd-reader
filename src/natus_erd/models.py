@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class RecordingInfo:
-    """Non-identifying structural metadata for a recording."""
+    """Structural metadata for a recording."""
 
     sample_rate: float
     n_samples: int
@@ -40,6 +40,7 @@ class ChannelInfo:
     is_signal: bool
     unit: str | None
     scale_uv_per_count: float | None
+    name_resolved: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,3 +64,5 @@ class ValidationReport:
     stored_samples: int
     missing_samples: int
     event_count: int
+    ent_record_count: int
+    unparsed_ent_record_count: int

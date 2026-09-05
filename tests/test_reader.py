@@ -88,6 +88,8 @@ class ReaderTests(unittest.TestCase):
         self.assertEqual(report.stored_samples, 9)
         self.assertEqual(report.missing_samples, 1)
         self.assertEqual(report.event_count, 1)
+        self.assertEqual(report.ent_record_count, 2)
+        self.assertEqual(report.unparsed_ent_record_count, 0)
 
         with self.assertRaises(IndexError):
             reader.read_samples(-1, 2)
@@ -95,8 +97,25 @@ class ReaderTests(unittest.TestCase):
             reader.read_samples(0, 11)
         with self.assertRaises(ValueError):
             reader.read_samples(0, 1, units="volts")
-        with self.assertRaises(KeyError):
+        with self.assertRaises(ValueError):
             reader.read_samples(0, 1, ["missing"])
+
+    def test_validation_reports_unparsed_ent_records(self) -> None:
+        from struct import pack
+        ent = self.fixture.stc.with_suffix('.ent')
+        payload = ent.read_bytes()
+        text = b'unknown vendor text\0\0'
+        # A real additional binary ENT record with unsupported text syntax.
+        from struct import unpack_from
+        cursor = 352
+        previous = 0
+        while cursor < len(payload)-16:
+            previous = unpack_from('<i', payload, cursor+4)[0]
+            cursor += previous
+        record = pack('<4i', 3, 16+len(text), previous, 0)+text
+        ent.write_bytes(payload[:-16]+record+bytes(16))
+        report = NatusERDReader.open(self.fixture.directory).validate()
+        self.assertEqual((report.ent_record_count, report.unparsed_ent_record_count, report.event_count), (3, 1, 1))
 
     def test_truncated_etc_is_reported_as_corruption(self) -> None:
         etc_path = self.fixture.first_erd.with_suffix(".etc")

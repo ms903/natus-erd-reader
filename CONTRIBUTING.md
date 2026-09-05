@@ -1,59 +1,59 @@
 # Contributing
 
-Use Python 3.10 or newer. A clean development environment is recommended:
+Use Python 3.10 or newer. Install development and interoperability tools in a
+virtual environment:
 
-```shell
+```sh
 python -m venv .venv
-# Activate the environment using the command appropriate for your shell.
-python -m pip install -e ".[dev]"
-python -m unittest discover -v -s tests -t .
-python -m build
-python -m twine check dist/*
-python tools/check_dist.py dist
+# Activate .venv for your shell.
+python -m pip install ".[dev,interop,timezones]"
+python -m unittest discover -s tests -t .
+python -m mypy src/natus_erd
 ```
 
-All automated tests generate synthetic recordings at runtime. Do not add
-clinical recordings, patient names, event text, exported waveforms, local
-credentials or derived plots to issues, pull requests, commits or artifacts.
-When reporting a format problem, supply sanitized structural metadata and a
-synthetic reproducer where possible.
+Synthetic fixtures in `tests/_fixture.py` exercise native packet decoding,
+channel order, gaps, safe ENT parsing, resource limits and EDF interoperability.
+C tests run when the extension is built; native CI explicitly requires it.
+On Windows, run native builds from a Visual Studio x64 developer shell.
+`NATUS_ERD_REQUIRE_NATIVE=1` makes compilation failure fatal.
+`NATUS_ERD_NO_NATIVE=1` selects a pure Python build.
 
-Keep unsupported schemas and headboxes explicit. Do not silently reuse the
-Quantum calibration for unverified hardware. Changes to packet decoding need
-tests for absolute values, delta sentinels, shorted channels and packet edges.
-Resource-boundary tests must intercept oversized requests or use synthetic
-bounded input; do not actually allocate gigabytes to test rejection paths.
-Keep metadata-only imports free of NumPy and never alter the user's global
-numerical-backend settings from package code.
+## Build and validate distributions
 
-CI sets `OPENBLAS_NUM_THREADS=1` and `OMP_NUM_THREADS=1` for the test runner
-to keep backend initialization predictable. These are application-side test
-settings, not package behavior or a substitute for an operating-system memory
-limit. Backend-specific failure diagnosis should record the actual environment
-and avoid unsafe reproduction on a user's machine.
+The staging helper copies package source, tests, examples and license files into
+a clean directory. Each build has its own staging tree.
 
-The installed distribution exposes Python APIs only. Do not add executables,
-web assets, EDF readers, optional plotting dependencies or real data to it.
-`tools/check_dist.py` is a development audit script, not an installed command.
+```sh
+python tools/build_artifacts.py --kind pure --output build/candidate
+python tools/build_artifacts.py --kind native --output build/candidate
+python tools/check_dist.py build/candidate --version 0.3.0rc1
+python -m twine check --strict build/candidate/*
+python tools/test_install.py build/candidate/natus_erd_reader-0.3.0rc1-py3-none-any.whl --backend pure
+python tools/test_install.py build/candidate/natus_erd_reader-0.3.0rc1.tar.gz --backend native
+```
 
-## Release checklist
+Use `test_install.py --backend native` on the wheel for the current platform as
+well. It verifies the imported package location and executes the regression suite
+against the installation. Optional MNE and pyEDFlib tests run when installed.
 
-1. Update the versions in `pyproject.toml` and `src/natus_erd/__init__.py`.
-2. Update `CHANGELOG.md`; run the unit suite and distribution audit from a
-   clean staging tree so removed files cannot survive in build caches.
-3. Confirm `git ls-files` contains no recordings, reports or credentials.
-4. Merge to `main` and wait for CI to succeed.
-5. Push an annotated `vX.Y.Z` tag. The release workflow builds and attaches a
-   wheel and source archive to the GitHub release.
+`build-assets.yml` uses cibuildwheel for CPython 3.10–3.14 Windows x64 and
+manylinux x86_64 wheels, plus a pure wheel and sdist. Its final audit requires
+all twelve assets with matching versions, metadata, tags and licenses.
+Linux CI also runs ASan/UBSan against the native implementation.
 
-6. For an explicitly authorized PyPI publication, configure a PyPI Trusted
-   Publisher for owner `ms903`, repository `natus-erd-reader`, workflow
-   `publish-pypi.yml`, and environment `pypi`. A new PyPI project requires a
-   pending publisher under the account's Publishing settings. See the
-   [official PyPI setup guide](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/).
-7. Manually run `publish-pypi.yml` with the released tag. It audits the existing
-   GitHub Release archives and uploads those same files using short-lived OIDC
-   credentials. It does not rebuild them or require a stored PyPI API token.
+## Release
 
-PyPI publication is a separate, explicitly authorized step, not triggered by
-ordinary pushes or by the GitHub Release workflow. Never commit credentials.
+Update the version in `pyproject.toml`, `src/natus_erd/__init__.py` and the brief
+changelog. Run the tests and distribution checks. The `vX.Y.Z` or `vX.Y.ZrcN`
+tag must match package metadata. The GitHub release workflow builds and attaches
+the complete asset set; candidate versions are marked as prereleases.
+
+PyPI publication is a separate manual `publish-pypi.yml` dispatch with the public
+release tag. It audits all release archives, verifies hashes and uses the `pypi`
+environment's OIDC Trusted Publisher. Publishing requires the corresponding
+repository/environment permissions.
+
+The bilingual documentation is maintained in the independent
+[natus-reader.github.io repository](https://github.com/natus-reader/natus-reader.github.io).
+Its contribution guide describes selecting package source and checking generated
+API data. Include both language updates when changing public behavior.

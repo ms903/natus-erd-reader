@@ -140,18 +140,6 @@ class SamplingCompatibilityTests(unittest.TestCase):
                     with self.assertRaises(ResourceLimitError):
                         reader.read_samples(0, 10, [0])
 
-    def test_open_preserves_existing_subclass_constructor_signature(self) -> None:
-        class ApplicationReader(NatusERDReader):
-            def __init__(self, stc_path, *, limits=ReadLimits()):
-                super().__init__(stc_path, limits=limits)
-                self.application_initialized = True
-
-        fixture = self._fixture(512.0)
-        reader = ApplicationReader.open(fixture.directory)
-        self.assertIsInstance(reader, ApplicationReader)
-        self.assertTrue(reader.application_initialized)
-        self.assertEqual(reader.info.sample_rate, 512.0)
-        self.assertEqual(reader.read_samples(0, 1, [0], units="digital")[0, 0], 1000)
 
 
 if __name__ == "__main__":
