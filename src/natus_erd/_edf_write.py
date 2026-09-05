@@ -26,7 +26,7 @@ def _header(plan, calibrations):
     n = len(plan.channels)
     header = b"".join((_field(0, 8), _field("X X X X", 80), _field(recording, 80),
         _field(dt.strftime("%d.%m.%y"), 8), _field(dt.strftime("%H.%M.%S"), 8),
-        _field(256*(n+2), 8), _field("EDF+C", 44), _field(plan.record_count, 8),
+        _field(256*(n+2), 8), _field(plan.edf_format, 44), _field(plan.record_count, 8),
         _field(plan.record_duration_text, 8), _field(n+1, 4)))
     fields = ((16, [label for _, _, label in plan.channel_labels]+["EDF Annotations"]), (80, [""]*(n+1)),
         (8, list(plan.channel_units)+[""]),
@@ -71,7 +71,7 @@ def write_export(reader, path, *, max_error_uv, progress, **options):
     scan_start = time.perf_counter()
     stats, last_notice, completed = None, scan_start, 0
     if progress:
-        progress({"stage": "range_scan", "samples": 0, "total": plan.logical_samples})
+        progress({"stage": "range_scan", "samples": 0, "total": plan.stored_samples})
     for _, width, values, _, _ in ordered_work(reader, plan):
         if values is not None:
             stats = combine_stats(stats, values)
@@ -80,7 +80,7 @@ def write_export(reader, path, *, max_error_uv, progress, **options):
             progress({"stage": "range_scan", "samples": completed, "total": plan.record_count*plan.record_samples})
             last_notice = time.perf_counter()
     if progress:
-        progress({"stage": "range_scan", "samples": completed, "total": plan.logical_samples})
+        progress({"stage": "range_scan", "samples": completed, "total": plan.stored_samples})
     if stats is None:
         raise DataIntegrityError("No source values were decoded")
     calibrations = tuple(calibrate(reader.channels[c], v, max_error_uv) for c, v in zip(plan.channels, stats))
@@ -102,6 +102,10 @@ def write_export(reader, path, *, max_error_uv, progress, **options):
                 if measured > max_error_uv+1e-9:
                     raise DataIntegrityError("Measured EDF quantization error exceeds its budget")
                 count = width//plan.record_samples
+                if (record_index+count > plan.record_count
+                        or sample != plan.record_sample(record_index)
+                        or sample+width-plan.record_samples != plan.record_sample(record_index+count-1)):
+                    raise DataIntegrityError("EDF waveform block crosses a gap or differs from its source range")
                 wave_bytes = len(plan.channels)*plan.record_samples*2
                 record_bytes = wave_bytes+plan.annotation_bytes
                 wave = np.frombuffer(codes, dtype="u1").reshape(len(plan.channels), count, plan.record_samples*2).transpose(1, 0, 2)
@@ -154,6 +158,9 @@ def write_export(reader, path, *, max_error_uv, progress, **options):
         backend=plan.backend, workers=plan.workers, chunk_samples=plan.chunk_samples,
         elapsed_seconds=time.perf_counter()-began, scan_seconds=scan_seconds,
         write_seconds=write_seconds, verify_seconds=verify_seconds,
+        edf_format=plan.edf_format, stored_ranges=plan.stored_ranges,
+        stored_samples=plan.stored_samples, stored_seconds=plan.stored_seconds,
+        time_span_seconds=plan.time_span_seconds, gap_seconds=plan.gap_seconds,
     )
 
 

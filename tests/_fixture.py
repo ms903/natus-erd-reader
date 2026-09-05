@@ -254,3 +254,24 @@ def build_continuous_recording(root: Path, *, sample_rate: float = 512.0,
     _snc(fixture.stc.with_suffix('.snc'), sample_rate, 999+samples)
     return SyntheticRecording(fixture.directory, fixture.stc, fixture.eeg, fixture.first_erd,
                                tuple(tuple(row) for row in zip(*values)))
+
+
+def build_discontinuous_recording(root: Path, *, spans=((0, 32), (544, 576)),
+                                  sample_rate=512.0, packet_samples=7):
+    """Synthetic stored spans; waveform values depend on original sample positions."""
+    fixture = build_continuous_recording(root, sample_rate=sample_rate, samples=spans[-1][1])
+    erd = bytearray(_erd_header(sample_rate=sample_rate))
+    etc = bytearray(_generic_header(3))
+    stored = 0
+    for a, b in spans:
+        for start in range(a, b, packet_samples):
+            stop = min(b, start+packet_samples)
+            block = [list(row) for row in zip(*(c[start:stop] for c in fixture.expected))]
+            etc.extend(pack('<iiihh',len(erd),1000+start,stored,len(block),0))
+            erd.extend(_encode_packet(block))
+            stored += len(block)
+    fixture.first_erd.write_bytes(erd)
+    fixture.first_erd.with_suffix('.etc').write_bytes(etc)
+    fixture.stc.write_bytes(_generic_header(1)+pack('<ii12i',1,1,*([0]*12))
+        +_stc_entry(fixture.stc.stem,1000,999+spans[-1][1],0,stored_samples=stored))
+    return fixture

@@ -119,7 +119,8 @@ class Job:
 
 
 def jobs(reader, plan):
-    for low, high in ((0, plan.logical_samples),):
+    for a, b in plan.stored_ranges:
+        low, high = a-plan.start, b-plan.start
         sample = low
         while sample < high:
             width = min(plan.chunk_samples, high-sample)

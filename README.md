@@ -3,7 +3,7 @@
 [中文文档](https://natus-reader.github.io/) · [English documentation](https://natus-reader.github.io/en/)
 
 Read Natus NeuroWorks ERD signals, ENT events and SNC clocks in Python, and
-export continuous windows as standard EDF+C for other analysis tools.
+export stored signals as standard EDF+C or EDF+D for other analysis tools.
 The source version is **0.3.0rc2**, a development candidate.
 
 ## Install
@@ -34,7 +34,7 @@ Arrays have shape `(channels, samples)` and float64 values. Signals default to
 microvolts; `units="digital"` returns decoded counts. Gaps and shorted channels
 are NaN. Use `iter_samples()` for longer intervals.
 
-## Export EDF+C
+## Export EDF+C or EDF+D
 
 ```python
 from natus_erd import NatusERDReader, export_edf
@@ -47,8 +47,15 @@ Defaults export all 276 channels with fixed Beijing UTC+08:00 and separate
 scan, write and verification progress bars. Set `progress=False` to hide them.
 Shorted channels retain their names and digital 32767. EEG quantization error
 is bounded by 0.5 uV; auxiliaries use the documented official calibration and
-units. The whole recording must be continuous and exactly representable;
-select `start`, `stop` or `channels` when needed.
+units. Continuous stored data produces EDF+C; gaps produce EDF+D with original
+record onsets. Every stored interval must fit one exact common record grid;
+no samples are padded or discarded. Select `start`, `stop` or `channels` when needed.
+
+`result.edf_format` identifies the output. `stored_samples` counts genuine samples
+per channel, while `logical_samples` is the requested span including gaps.
+`stored_seconds`, `time_span_seconds` and `gap_seconds` distinguish valid data
+duration from elapsed recording time; `elapsed_seconds` measures conversion work.
+Use an EDF+D-aware reader for discontinuous files. The MNE example requires EDF+C.
 
 Parsed events from the entire recording are retained. Results include output
 labels, units and separate `scan_seconds`, `write_seconds`, `verify_seconds`

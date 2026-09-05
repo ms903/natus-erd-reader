@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Automatically export discontinuous stored intervals as EDF+D, retaining original
+  sample-stamp gaps, fractional onsets and all source events.
+- Report stored samples, valid duration, first-to-last time span and gap duration
+  separately. Reject empty windows and inexact common record grids without padding.
+- Verify every record onset and waveform windows within each stored interval;
+  exercise independent EDF+D reading, packet-boundary carries and failure cleanup.
+
 ## 0.3.0rc2
 
 - Use fixed Beijing UTC+08:00 by default for clocks and EDF export.

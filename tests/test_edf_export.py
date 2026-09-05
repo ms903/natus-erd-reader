@@ -129,18 +129,14 @@ class EdfExportTests(unittest.TestCase):
         self.assertEqual(clock.call_count, 1)
         self.assertEqual(events.call_count, 1)
 
-    def test_gap_windows_refused_before_decoding_with_intervals(self):
+    def test_empty_gap_window_refused_before_decoding(self):
         root = self.root/'gaps'
         root.mkdir()
         fixture = build_recording(root)
         reader = NatusERDReader.open(fixture.directory)
-        for first, last in ((0, 10), (5, 10), (0, 6), (5, 6)):
-            with self.subTest(window=(first, last)):
-                with patch.object(reader, 'read_clock', side_effect=AssertionError('premature clock read')):
-                    with self.assertRaisesRegex(UnsupportedFormatError, 'available intervals:'):
-                        export_edf(reader, self.root/'gap.edf', start=first, stop=last)
-        with self.assertRaisesRegex(UnsupportedFormatError, r'\[0, 5\).*\[6, 10\)'):
-            plan_edf(reader)
+        with patch.object(reader, 'read_clock', side_effect=AssertionError('premature clock read')):
+            with self.assertRaisesRegex(UnsupportedFormatError, 'No stored samples'):
+                export_edf(reader, self.root/'gap.edf', start=5, stop=6)
         self.assertFalse((self.root/'gap.edf').exists())
 
     def test_inexact_tail_and_fractional_rate_alignment(self):

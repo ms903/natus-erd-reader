@@ -1,7 +1,7 @@
 # EDF+D observations and implementation design
 
-This is a development design, not a public export interface. `export_edf`
-currently writes continuous EDF+C. The accompanying JSON contains only
+`export_edf` automatically writes EDF+C for one stored interval and EDF+D
+for multiple stored intervals. This document records its mapping and evidence. The accompanying JSON contains only
 anonymous structural measurements; no source paths, identities or event text.
 
 ## Reference evidence
@@ -55,7 +55,7 @@ onset marks its first sample, so a gap belongs between records, not inside a
 record. Header local time and the initial fractional TAL jointly locate the
 first sample. EDF contains no timezone identifier.
 
-## Proposed mapping
+## Implemented mapping
 
 Use the source stored intervals `[a, b)` after intersecting the requested
 window. Select one exact record size that divides **every** interval length,
@@ -70,14 +70,17 @@ gap. Store only available samples. Report stored sample count, logical sample
 span and record-duration sum separately. Reuse bounded packet jobs and the
 existing signal calibration, ordered writer and all-record verifier.
 
-Use a sorted record-start index to assign events. An event inside a record
+Use sorted segment starts and cumulative record counts to assign events,
+without building an index entry for every record. An event inside a record
 goes there; an event in a gap goes in the next record with its original onset.
 Before/after-window events go in the first/last record, preserving the whole
 source event policy. Annotation capacity is checked before writing; event
 times are never moved to match their storage record.
 
-The first implementation should reject a window if no common exact grid
-exists. Do not silently pad, trim, join gaps or invent valid duration. A future
+The implementation rejects a window if no common exact grid exists.
+EDF+D requires at least two samples per record here: the specification uses
+zero-duration records for the single-sample case, which cannot retain the
+source rate in the positive-duration layout used by this exporter. Do not silently pad, trim, join gaps or invent valid duration. A future
 explicit padding feature needs a documented validity representation and
 third-party tests before adopting the observed vendor tail behavior. Zero
 padding alone does not communicate the number of genuine source samples.
@@ -86,7 +89,7 @@ padding alone does not communicate the number of genuine source samples.
 
 `edf-d-cases.json` gives an anonymous two-segment case with exact TALs,
 boundary/gap events, and a fractional-rate case that must fail without output.
-Future implementation tests should decode every stored sample, preserve the
+Implementation tests decode stored samples, preserve the
 gap in an EDF+D-aware reader, check events on either side of a boundary, cover
 shorted channels and incomplete tails, and reject non-monotonic onsets,
 records crossing gaps, changed TALs and truncated records. Reusing the EDF+C

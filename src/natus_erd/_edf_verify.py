@@ -1,4 +1,4 @@
-"""Private bounded readback of the EDF+C file produced by the exporter."""
+"""Private bounded readback of EDF+C/D files produced by the exporter."""
 from __future__ import annotations
 
 from fractions import Fraction
@@ -37,7 +37,7 @@ def verify_export(
         try:
             start_time = ClockEstimate(Fraction(plan._header_ticks), "anchor").to_datetime(
                 timezone(timedelta(seconds=plan._utc_offset_seconds)))
-            if (header[:8].strip() != b"0" or header[192:236].strip() != b"EDF+C"
+            if (header[:8].strip() != b"0" or header[192:236].strip() != plan.edf_format.encode("ascii")
                     or header[168:176].decode() != start_time.strftime("%d.%m.%y")
                     or header[176:184].decode() != start_time.strftime("%H.%M.%S")
                     or int(header[184:192]) != header_bytes
@@ -83,7 +83,7 @@ def verify_export(
             expected = bytearray(count*plan.annotation_bytes)
             for offset in range(count):
                 index = first+offset
-                tal = _tal(plan._origin+Fraction(index*plan.record_samples)/plan.sample_rate)+plan._events.get(index, b"")
+                tal = _tal(plan._origin+Fraction(plan.record_sample(index))/plan.sample_rate)+plan._events.get(index, b"")
                 begin = offset*plan.annotation_bytes
                 expected[begin:begin+len(tal)] = tal
             if not np.array_equal(annotations, np.frombuffer(expected, dtype="u1").reshape(count, plan.annotation_bytes)):
@@ -112,28 +112,32 @@ def verify_export(
                 if progress and completed < plan.record_count:
                     progress({"stage": "verify", "records": completed, "total": plan.record_count})
 
-        starts = sorted({0, plan.logical_samples//4, plan.logical_samples//2,
-                         plan.logical_samples*3//4, max(0, plan.logical_samples-16)})
         width_limit = min(16, reader.limits.max_read_samples, reader.limits.max_read_bytes//8)
         if width_limit < 1:
             from .errors import ResourceLimitError
             raise ResourceLimitError("EDF readback requires space for one source sample")
         # Each window uses one contiguous EDF read and batched source channels.
         # Small user read limits still apply to these independent source reads.
-        for start in starts:
-            stop = min(start+width_limit, plan.logical_samples)
-            first_record = start//plan.record_samples
-            last_record = (stop+plan.record_samples-1)//plan.record_samples
+        def windows():
+            for span, (a, b) in enumerate(plan.stored_ranges):
+                length = b-a
+                for local in sorted({0, length//4, length//2, length*3//4, max(0,length-16)}):
+                    yield a+local, min(a+local+width_limit,b), plan._record_offsets[span], a
+
+        for start, stop, record_offset, span_start in windows():
+            first_record = record_offset+(start-span_start)//plan.record_samples
+            last_record = record_offset+(stop-span_start+plan.record_samples-1)//plan.record_samples
             stream.seek(header_bytes+first_record*record_bytes)
             payload = stream.read((last_record-first_record)*record_bytes)
             codes: NDArray[np.int16] = np.ndarray((last_record-first_record, rows, plan.record_samples), dtype="<i2",
                                buffer=payload, strides=(record_bytes, plan.record_samples*2, 2))
-            values = codes.transpose(1, 0, 2).reshape(rows, -1)[:, start-first_record*plan.record_samples:stop-first_record*plan.record_samples]
+            begin = start-span_start-(first_record-record_offset)*plan.record_samples
+            values = codes.transpose(1, 0, 2).reshape(rows, -1)[:, begin:begin+stop-start]
             batch_rows = max(1, min(rows, reader.limits.max_selected_channels,
                                    reader.limits.max_read_bytes//(8*(stop-start))))
             for first in range(0, rows, batch_rows):
                 selected = plan.channels[first:first+batch_rows]
-                source = reader.read_samples(plan.start+start, plan.start+stop, selected, units="digital")
+                source = reader.read_samples(start, stop, selected, units="digital")
                 for row, channel in enumerate(selected, first):
                     cal = calibrations[row]
                     if channel in plan.shorted_channels:

@@ -1,12 +1,13 @@
-"""Preflight and export of continuous, interoperable EDF+C files."""
+"""Preflight and export of EDF+C and discontinuous EDF+D files."""
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from bisect import bisect_right
 from dataclasses import dataclass, field, replace
 from datetime import tzinfo
 from fractions import Fraction
 from functools import lru_cache
-from math import isfinite
+from math import gcd, isfinite
 from pathlib import Path
 from typing import Literal, TypeAlias
 
@@ -96,6 +97,8 @@ class EdfExportPlan:
     annotation_bytes: int
     output_bytes: int
     event_count: int
+    stored_ranges: tuple[tuple[int, int], ...]
+    _record_offsets: tuple[int, ...] = field(repr=False)
     backend: str = "python"
     workers: int = 1
     chunk_samples: int = 1
@@ -108,12 +111,42 @@ class EdfExportPlan:
 
     @property
     def logical_samples(self) -> int:
-        """Number of samples per exported signal, with no padding."""
+        """Requested sample span, including unavailable positions."""
         return self.stop-self.start
+
+    @property
+    def stored_samples(self) -> int:
+        """Number of genuine samples written per signal."""
+        return self.record_count*self.record_samples
+
+    @property
+    def edf_format(self) -> Literal["EDF+C", "EDF+D"]:
+        return "EDF+D" if len(self.stored_ranges) > 1 else "EDF+C"
+
+    @property
+    def stored_seconds(self) -> Fraction:
+        return Fraction(self.stored_samples)/self.sample_rate
+
+    @property
+    def time_span_seconds(self) -> Fraction:
+        """Time from the first stored sample through the last sample interval."""
+        return Fraction(self.stored_ranges[-1][1]-self.stored_ranges[0][0])/self.sample_rate
+
+    @property
+    def gap_seconds(self) -> Fraction:
+        return self.time_span_seconds-self.stored_seconds
+
+    def record_sample(self, index: int) -> int:
+        """Source sample relative to start for a stored record index."""
+        if not 0 <= index < self.record_count:
+            raise IndexError("EDF record index out of range")
+        span = bisect_right(self._record_offsets, index)-1
+        return self.stored_ranges[span][0]-self.start+(index-self._record_offsets[span])*self.record_samples
 
     def record_starts(self) -> Iterator[int]:
         """Record start samples relative to the exported window."""
-        return iter(range(0, self.logical_samples, self.record_samples))
+        for first, last in self.stored_ranges:
+            yield from range(first-self.start, last-self.start, self.record_samples)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +170,12 @@ class EdfExportResult:
     scan_seconds: float
     write_seconds: float
     verify_seconds: float
+    edf_format: Literal["EDF+C", "EDF+D"]
+    stored_ranges: tuple[tuple[int, int], ...]
+    stored_samples: int
+    stored_seconds: Fraction
+    time_span_seconds: Fraction
+    gap_seconds: Fraction
 
 
 def _clock_metadata(
@@ -162,19 +201,30 @@ def _layout(
     shorted: tuple[int, ...], labels: tuple[tuple[int, str, str], ...],
     rate: Fraction, points: int, duration: str, source_events: tuple[tuple[int, bytes], ...],
     clock: tuple[int, int, Fraction], slot: int | Literal["auto"],
+    spans: tuple[tuple[int, int], ...],
+    onset_places: int,
 ) -> EdfExportPlan:
-    count = (last-first)//points
+    offsets = []
+    count = 0
+    for a, b in spans:
+        offsets.append(count)
+        count += (b-a)//points
     if not 1 <= count <= 99_999_999:
         raise UnsupportedFormatError("EDF record count exceeds its 8-character field")
     event_records: dict[int, bytes] = {}
+    span_starts = tuple(a-first for a, _ in spans)
     for sample, tal in source_events:
-        index = max(0, min(count-1, sample//points))
+        span = max(0, bisect_right(span_starts, sample)-1)
+        a, b = spans[span]
+        if sample >= b-first and span+1 < len(spans):
+            index = offsets[span+1]
+        else:
+            index = max(0, min(count-1, offsets[span]+max(0, sample-(a-first))//points))
         event_records[index] = event_records.get(index, b"")+tal
     origin = clock[2]
     # Bound decimal lengths for every onset without enumerating the records.
-    quantum = Fraction(1, (Fraction(points)/rate).denominator*origin.denominator)
-    places = len(_decimal(quantum).partition(".")[2])
-    last_onset = origin+Fraction(last-first-points)/rate
+    places = max(onset_places, len(_decimal(Fraction(points)/rate).partition(".")[2]))
+    last_onset = origin+Fraction(spans[-1][1]-first-points)/rate
     time_bound = max(len(str(abs(int(origin)))), len(str(abs(int(last_onset)))))+places+6
     required = time_bound+max(map(len, event_records.values()), default=0)
     required += required % 2
@@ -185,7 +235,7 @@ def _layout(
         raise ResourceLimitError("EDF annotation capacity cannot contain complete event TALs")
     total = 256*(len(selected)+2)+count*(2*len(selected)*points+size)
     return EdfExportPlan(first, last, selected, shorted, labels, tuple(channel_unit(c) for c in selected), rate, points, duration,
-                         count, size, total, len(source_events), _header_ticks=clock[0],
+                         count, size, total, len(source_events), spans, tuple(offsets), _header_ticks=clock[0],
                          _utc_offset_seconds=clock[1], _origin=origin, _events=event_records)
 
 
@@ -198,13 +248,14 @@ def plan_edf(
     memory_budget_bytes: int = 256*1024**2, chunk_samples: int | None = None,
     progress: Progress | None = None,
 ) -> EdfExportPlan:
-    """Plan a fully stored [start, stop) window using source sample indices.
+    """Plan stored data in [start, stop), automatically choosing EDF+C or EDF+D.
 
     Defaults select every recorded channel, including shorted channels. Events
     cover the whole source recording; ``types`` replaces text with note types.
     Beijing (fixed UTC+08:00) is the default wall clock and needs no timezone data.
     No waveforms are decoded here: export's range scan checks quantization.
-    Gaps or an inexact record grid raise UnsupportedFormatError; insufficient
+    Gaps between stored ranges are preserved by EDF+D record onsets. Empty
+    windows or an inexact common record grid raise UnsupportedFormatError; insufficient
     buffer, annotation or explicit output budgets raise ResourceLimitError.
     """
     first = _integer(start, "start")
@@ -239,11 +290,13 @@ def plan_edf(
     for span in reader.iter_stored_ranges(first, last):
         spans.append(span)
         check_limit(len(spans), reader.limits.max_segments, "EDF interval count")
-    if spans != [(first, last)]:
-        choices = ", ".join(f"[{a}, {b})" for a, b in spans) or "none in this window"
-        raise UnsupportedFormatError(f"EDF+C requires a continuous, fully stored window; available intervals: {choices}")
+        check_limit(len(spans)*256, reader.limits.max_metadata_bytes, "EDF interval metadata")
+    if not spans:
+        raise UnsupportedFormatError("No stored samples in this export window")
     rate = Fraction.from_float(reader.info.sample_rate)
-    clock = _clock_metadata(reader, first, last, rate, timezone, extrapolation, max_extrapolation_seconds)
+    clock = _clock_metadata(reader, spans[0][0], spans[-1][1], rate, timezone, extrapolation, max_extrapolation_seconds)
+    clock = (clock[0], clock[1], clock[2]-Fraction(spans[0][0]-first)/rate)
+    onset_places = max(len(_decimal(clock[2]+Fraction(a-first)/rate).partition(".")[2]) for a, _ in spans)
     source_events = []
     event_bytes = 0
     for event in (() if events == "none" else reader.read_events()):
@@ -251,7 +304,7 @@ def plan_edf(
         text = event.text if events == "full" else f"type:{event.note_type if event.note_type is not None else 'unknown'}"
         tal = _tal(clock[2]+Fraction(sample)/rate, escape_event(text))
         event_bytes += len(tal)
-        check_limit(event_bytes, reader.limits.max_metadata_bytes, "EDF events bytes")
+        check_limit(event_bytes+len(spans)*256, reader.limits.max_metadata_bytes, "EDF events and intervals bytes")
         source_events.append((sample, tal))
     names = tuple(reader.channels[c].name for c in selected)
     labels = tuple(zip(selected, names, header_labels(names)))
@@ -266,7 +319,15 @@ def plan_edf(
     best = None
     last_error = None
     suggestion = None
+    common = 0
+    for a, b in spans:
+        common = gcd(common, b-a)
     for points in range(step, maximum_points+1, step):
+        # EDF+D with one sample per ordinary signal uses zero-duration records
+        # in the specification. This exporter retains the declared source rate
+        # through a positive duration, so require at least two samples instead.
+        if len(spans) > 1 and points == 1:
+            continue
         try:
             duration = _duration_text(Fraction(points)/rate)
         except UnsupportedFormatError:
@@ -274,11 +335,11 @@ def plan_edf(
         aligned = (last-first)//points*points
         if aligned:
             suggestion = max(suggestion or 0, aligned)
-        if (last-first) % points:
+        if common % points:
             continue
         try:
             candidate = _layout(reader, first, last, selected, shorted, labels, rate,
-                                points, duration, tuple(source_events), clock, annotation_bytes)
+                                points, duration, tuple(source_events), clock, annotation_bytes, tuple(spans), onset_places)
         except (ResourceLimitError, UnsupportedFormatError) as exc:
             last_error = exc
             continue
@@ -287,7 +348,7 @@ def plan_edf(
     if best is None:
         if last_error is not None:
             raise last_error
-        suffix = f"; candidate aligned window start={first}, stop={first+suggestion}" if suggestion else ""
+        suffix = f"; candidate aligned window start={first}, stop={first+suggestion}" if suggestion and spans == [(first,last)] else ""
         raise UnsupportedFormatError("No exact EDF record grid for this window"+suffix)
     if max_output_bytes is not None:
         check_limit(best.output_bytes, max_output_bytes, "Planned EDF file bytes")
@@ -311,7 +372,7 @@ def export_edf(
     memory_budget_bytes: int = 256*1024**2, chunk_samples: int | None = None,
     progress: bool | Progress = True,
 ) -> EdfExportResult:
-    """Write EDF+C with a range scan, bounded encoding and checked publication.
+    """Write EDF+C or EDF+D with bounded encoding and checked publication.
 
     EEG is calibrated in uV with a maximum quantization error of 0.5 uV by
     default. Auxiliary calibration follows the documented Quantum EDF units.
@@ -330,5 +391,3 @@ def export_edf(
             max_output_bytes=max_output_bytes, max_error_uv=max_error_uv,
             backend=backend, workers=workers, memory_budget_bytes=memory_budget_bytes,
             chunk_samples=chunk_samples, progress=callback)
-
-
