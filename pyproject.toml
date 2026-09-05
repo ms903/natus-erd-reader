@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "natus-erd-reader"
-version = "0.3.0rc2"
+version = "0.3.0rc3"
 description = "Resource-bounded Natus ERD reader and EDF+C/EDF+D export"
 readme = "README.md"
 requires-python = ">=3.10"

@@ -26,10 +26,10 @@ a clean directory. Each build has its own staging tree.
 ```sh
 python tools/build_artifacts.py --kind pure --output build/candidate
 python tools/build_artifacts.py --kind native --output build/candidate
-python tools/check_dist.py build/candidate --version 0.3.0rc1
+python tools/check_dist.py build/candidate --version 0.3.0rc3
 python -m twine check --strict build/candidate/*
-python tools/test_install.py build/candidate/natus_erd_reader-0.3.0rc1-py3-none-any.whl --backend pure
-python tools/test_install.py build/candidate/natus_erd_reader-0.3.0rc1.tar.gz --backend native
+python tools/test_install.py build/candidate/natus_erd_reader-0.3.0rc3-py3-none-any.whl --backend pure
+python tools/test_install.py build/candidate/natus_erd_reader-0.3.0rc3.tar.gz --backend native
 ```
 
 Use `test_install.py --backend native` on the wheel for the current platform as

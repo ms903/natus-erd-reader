@@ -4,19 +4,19 @@
 
 Read Natus NeuroWorks ERD signals, ENT events and SNC clocks in Python, and
 export stored signals as standard EDF+C or EDF+D for other analysis tools.
-The source version is **0.3.0rc2**, a development candidate.
+The source version is **0.3.0rc3**, a development candidate.
 
 ## Install
 
 Use Python 3.10+. NumPy and tqdm are installed automatically:
 
 ```sh
-python -m pip install "natus-erd-reader==0.3.0rc2"
+python -m pip install "natus-erd-reader==0.3.0rc3"
 ```
 
 The optional C extension accelerates EDF export. A single-worker Python
 implementation is available on other platforms. For named timezones on systems
-without an IANA database, install `natus-erd-reader[timezones]==0.3.0rc2`.
+without an IANA database, install `natus-erd-reader[timezones]==0.3.0rc3`.
 The default Beijing offset does not require this extra.
 
 ## Read a window

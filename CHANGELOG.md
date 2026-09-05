@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0rc3
 
 - Automatically export discontinuous stored intervals as EDF+D, retaining original
   sample-stamp gaps, fractional onsets and all source events.
